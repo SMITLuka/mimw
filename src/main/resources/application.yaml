@@ -1,3 +1,14 @@
 spring:
   application:
     name: mimw
+
+  # TODO: Kada se spoji AS400 DB2, odkomentirati i ukloniti exclude iz MimwApplication.java:
+  # datasource:
+  #   url: jdbc:as400://AS400_HOST/LIBRARY_NAME
+  #   username: USERNAME
+  #   password: PASSWORD
+  #   driver-class-name: com.ibm.as400.access.AS400JDBCDriver
+
+server:
+  port: 8081
+
