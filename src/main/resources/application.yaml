@@ -10,5 +10,5 @@ spring:
   #   driver-class-name: com.ibm.as400.access.AS400JDBCDriver
 
 server:
-  port: 8081
+  port: ${PORT:8081}
 
