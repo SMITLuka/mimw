@@ -18,7 +18,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/ping", "/api/**", "/actuator/**").permitAll()
+                        .requestMatchers("/ping", "/api/**", "/mimv/**", "/actuator/**").permitAll()
                         .anyRequest().authenticated()
                 );
 
