@@ -5,6 +5,8 @@ import com.smit.mimw.service.TaxPayerService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/mimv")
 public class TaxPayerController {
@@ -42,9 +44,9 @@ public class TaxPayerController {
     public ResponseEntity<ApiResponse<IsSuccessResponse>> saveTaxPayerType(
             @RequestHeader("mandatorId") String mandatorId,
             @RequestHeader("companyId") String companyId,
-            @RequestBody TaxPayerTypeRequest request) {
+            @RequestBody List<TaxPayerTypeRequest> requests) {
 
-        IsSuccessResponse response = taxPayerService.saveTaxPayerType(mandatorId, companyId, request);
+        IsSuccessResponse response = taxPayerService.saveTaxPayerType(mandatorId, companyId, requests);
         return ResponseEntity.ok(ApiResponse.ok(response, "Taxpayer type saved successfully."));
     }
 

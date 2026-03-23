@@ -5,15 +5,14 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
-
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class TaxPayerTypeRequest {
 
-    private List<TaxPayerType> taxPayerTypes;
+    private String taxPayerCode;
+    private String taxPayerDescription;
 
 }
 

@@ -33,14 +33,17 @@ public class TaxPayerService {
                 TaxPayerType.builder()
                         .taxPayerCode("01")
                         .taxPayerDescription("Manufacturer (Proizvođač)")
+                        .selected(false)
                         .build(),
                 TaxPayerType.builder()
                         .taxPayerCode("02")
                         .taxPayerDescription("Trader (Trgovac)")
+                        .selected(true)
                         .build(),
                 TaxPayerType.builder()
                         .taxPayerCode("03")
                         .taxPayerDescription("Registered Trader (Registrirani trgovac)")
+                        .selected(false)
                         .build()
         );
 
@@ -55,17 +58,19 @@ public class TaxPayerService {
      * TODO: Replace with AS400 DB2 insert, e.g.:
      *   jdbcTemplate.update("INSERT INTO TAX_PAYER_TYPES (TAX_CODE, TAX_DESC, MANDATOR_ID, COMPANY_ID) VALUES (?,?,?,?)", ...)
      */
-    public IsSuccessResponse saveTaxPayerType(String mandatorId, String companyId, TaxPayerTypeRequest request) {
-        log.info("Saving taxpayer type code={} for mandatorId={}, companyId={}",
-                request.getTaxPayerCode(), mandatorId, companyId);
+    public IsSuccessResponse saveTaxPayerType(String mandatorId, String companyId, List<TaxPayerTypeRequest> requests) {
+        log.info("Saving {} taxpayer type(s) for mandatorId={}, companyId={}",
+                requests.size(), mandatorId, companyId);
 
-        // TODO: Replace with AS400 DB2 insert
-        // Validate input
-        if (request.getTaxPayerCode() == null || request.getTaxPayerCode().isBlank()) {
-            throw new IllegalArgumentException("taxPayerCode is required.");
-        }
-        if (request.getTaxPayerDescription() == null || request.getTaxPayerDescription().isBlank()) {
-            throw new IllegalArgumentException("taxPayerDescription is required.");
+        // TODO: Replace with AS400 DB2 insert for each entry
+        for (TaxPayerTypeRequest request : requests) {
+            if (request.getTaxPayerCode() == null || request.getTaxPayerCode().isBlank()) {
+                throw new IllegalArgumentException("taxPayerCode is required.");
+            }
+            if (request.getTaxPayerDescription() == null || request.getTaxPayerDescription().isBlank()) {
+                throw new IllegalArgumentException("taxPayerDescription is required.");
+            }
+            log.info("  -> code={}, description={}", request.getTaxPayerCode(), request.getTaxPayerDescription());
         }
 
         // Dummy: always succeeds
