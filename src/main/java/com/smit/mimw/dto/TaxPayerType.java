@@ -13,5 +13,7 @@ public class TaxPayerType {
 
     private String taxPayerCode;
     private String taxPayerDescription;
+    private boolean selected;
+
 }
 
