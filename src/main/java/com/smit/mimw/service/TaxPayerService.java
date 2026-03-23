@@ -115,21 +115,48 @@ public class TaxPayerService {
                         .build()
         );
 
-        return FormBuildResponse.builder()
-                .id(1001L)
-                .dateFrom(request.getDateFrom() != null ? request.getDateFrom() : LocalDate.now().withDayOfMonth(1))
-                .dateTo(request.getDateTo() != null ? request.getDateTo() : LocalDate.now())
-                .taxNewVehiclesSum(new BigDecimal("4500.00"))
-                .taxUsedVehiclesSum(new BigDecimal("2100.00"))
-                .taxPayersTypeSelected(request.getTaxPayerCode())
-                .mandatorDescription("Mandator " + mandatorId)
-                .companyDescription("Company " + companyId)
-                .taxOfficeCode(request.getTaxOfficeCode())
-                .taxOfficeDescription(request.getTaxOfficeDescription())
-                .destinationEmail(request.getDestinationEmail())
-                .isUsed(false)
-                .vehiclesToTax(dummyVehicles)
+    /**
+     * Returns a preview of existing MI-MV processed entries along with the selected taxpayer type (dummy data).
+     * <p>
+     * TODO: Replace with AS400 DB2 queries to fetch actual processed form history.
+     */
+    public PreviewExistingResponse getPreviewExisting(String mandatorId, String companyId) {
+        log.info("Fetching existing preview for mandatorId={}, companyId={}", mandatorId, companyId);
+
+        // TODO: Replace with AS400 DB2 call
+        TaxPayerType selectedType = TaxPayerType.builder()
+                .taxPayerCode("02")
+                .taxPayerDescription("Trader (Trgovac)")
+                .selected(true)
+                .build();
+
+        List<MimvProcessedItem> processed = List.of(
+                MimvProcessedItem.builder()
+                        .identificator("MIMV-2026-001")
+                        .action("SUBMITTED")
+                        .dateFrom(LocalDate.of(2026, 1, 1))
+                        .dateTo(LocalDate.of(2026, 1, 31))
+                        .build(),
+                MimvProcessedItem.builder()
+                        .identificator("MIMV-2026-002")
+                        .action("APPROVED")
+                        .dateFrom(LocalDate.of(2026, 2, 1))
+                        .dateTo(LocalDate.of(2026, 2, 28))
+                        .build(),
+                MimvProcessedItem.builder()
+                        .identificator("MIMV-2026-003")
+                        .action("DRAFT")
+                        .dateFrom(LocalDate.of(2026, 3, 1))
+                        .dateTo(LocalDate.of(2026, 3, 31))
+                        .build()
+        );
+
+        return PreviewExistingResponse.builder()
+                .taxPayerType(selectedType)
+                .mimvProcessed(processed)
                 .build();
     }
 }
+
+
 

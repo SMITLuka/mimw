@@ -67,5 +67,21 @@ public class TaxPayerController {
         FormBuildResponse response = taxPayerService.buildForm(mandatorId, companyId, request);
         return ResponseEntity.ok(ApiResponse.ok(response, "Form built successfully."));
     }
+
+    /**
+     * GET /mimv/preview/existing
+     *
+     * Returns the selected taxpayer type and a list of already processed MI-MV forms.
+     *
+     * Required headers: mandatorId, companyId
+     */
+    @GetMapping("/preview/existing")
+    public ResponseEntity<ApiResponse<PreviewExistingResponse>> getPreviewExisting(
+            @RequestHeader("mandatorId") String mandatorId,
+            @RequestHeader("companyId") String companyId) {
+
+        PreviewExistingResponse response = taxPayerService.getPreviewExisting(mandatorId, companyId);
+        return ResponseEntity.ok(ApiResponse.ok(response, "Existing preview fetched successfully."));
+    }
 }
 
