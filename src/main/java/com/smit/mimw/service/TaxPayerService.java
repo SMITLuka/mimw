@@ -115,6 +115,23 @@ public class TaxPayerService {
                         .build()
         );
 
+        return FormBuildResponse.builder()
+                .id(1001L)
+                .dateFrom(request.getDateFrom() != null ? request.getDateFrom() : LocalDate.now().withDayOfMonth(1))
+                .dateTo(request.getDateTo() != null ? request.getDateTo() : LocalDate.now())
+                .taxNewVehiclesSum(new BigDecimal("4500.00"))
+                .taxUsedVehiclesSum(new BigDecimal("2100.00"))
+                .taxPayersTypeSelected(request.getTaxPayerCode())
+                .mandatorDescription("Mandator " + mandatorId)
+                .companyDescription("Company " + companyId)
+                .taxOfficeCode(request.getTaxOfficeCode())
+                .taxOfficeDescription(request.getTaxOfficeDescription())
+                .destinationEmail(request.getDestinationEmail())
+                .isUsed(false)
+                .vehiclesToTax(dummyVehicles)
+                .build();
+    }
+
     /**
      * Returns a preview of existing MI-MV processed entries along with the selected taxpayer type (dummy data).
      * <p>
