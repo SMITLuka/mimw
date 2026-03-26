@@ -3,7 +3,10 @@ spring:
     name: mimw
 
   datasource:
-    url: jdbc:as400://172.19.237.6
+    # prompt=false  → prevents JT400 from opening a Swing GUI dialog on auth failure
+    # naming=sql    → use SQL-style schema.table naming (vs AS400 system naming schema/table)
+    # errors=full   → full error messages from AS400
+    url: jdbc:as400://172.19.237.6;prompt=false;naming=sql;errors=full
     username: msecofr
     # Password is computed dynamically as MMYY (e.g. March 2026 = "0326").
     # Override with env var SPRING_DATASOURCE_PASSWORD if needed.
@@ -12,6 +15,10 @@ spring:
       connection-timeout: 30000
       maximum-pool-size: 5
       minimum-idle: 1
+      # Allow the app to start even if AS400 is unreachable at boot time
+      # (e.g. Render deployment where AS400 is on a private network).
+      # Connections will be established lazily on first request.
+      initialization-fail-timeout: -1
 
 server:
   port: ${PORT:8081}

@@ -14,7 +14,7 @@ import java.time.LocalDate;
 /**
  * Configures the AS400 DataSource.
  *
- * Password convention: MMYY — e.g. March 2026 → "0326", April 2026 → "0426".
+ * Password convention: CDP + MMYY — e.g. March 2026 → "CDP0326", April 2026 → "CDP0426".
  * The password is computed at application startup. If the app runs across a
  * month boundary, restart it so a fresh connection pool picks up the new password.
  *
@@ -38,6 +38,10 @@ public class As400Config {
     @Bean
     @Primary
     public DataSource as400DataSource() {
+        // Ensure JT400 never attempts to open a Swing GUI dialog in a headless environment.
+        // This complements the "prompt=false" in the JDBC URL as a safety net.
+        System.setProperty("java.awt.headless", "true");
+
         String password = (passwordOverride != null && !passwordOverride.isBlank())
                 ? passwordOverride
                 : resolvePassword();
@@ -54,10 +58,10 @@ public class As400Config {
     }
 
     /**
-     * Computes the current password as MMYY (e.g. March 2026 = "0326").
+     * Computes the current password as CDP + MMYY (e.g. March 2026 = "CDP0326").
      */
     public static String resolvePassword() {
         LocalDate now = LocalDate.now();
-        return String.format("%02d%02d", now.getMonthValue(), now.getYear() % 100);
+        return String.format("CDP%02d%02d", now.getMonthValue(), now.getYear() % 100);
     }
 }
