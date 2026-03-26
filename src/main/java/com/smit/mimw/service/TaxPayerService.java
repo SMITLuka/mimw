@@ -1,6 +1,7 @@
 package com.smit.mimw.service;
 
 import com.smit.mimw.dto.*;
+import com.smit.mimw.repository.As400Repository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -12,43 +13,32 @@ import java.util.List;
 /**
  * Service for taxpayer type and form-build operations.
  * <p>
- * TODO: Replace all dummy implementations with AS400 DB2 calls.
+ * Three methods are backed by live AS400 DB2 queries (via As400Repository).
+ * The remaining methods still return dummy data — replace with AS400 calls when ready.
  */
 @Service
 public class TaxPayerService {
 
     private static final Logger log = LoggerFactory.getLogger(TaxPayerService.class);
 
+    private final As400Repository as400Repository;
+
+    public TaxPayerService(As400Repository as400Repository) {
+        this.as400Repository = as400Repository;
+    }
+
     /**
-     * Returns a list of taxpayer types (dummy data).
+     * Returns a list of taxpayer types from AS400 DB2.
      * <p>
-     * TODO: Replace with AS400 DB2 query, e.g.:
-     *   jdbcTemplate.query("SELECT TAX_CODE, TAX_DESC FROM TAX_PAYER_TYPES WHERE MANDATOR_ID=? AND COMPANY_ID=?", ...)
+     * Query: SELECT AUVARA, AUOPIS FROM ivas0000b0.ivasdet WHERE aupgm = 'KMDPDFR'
+     * <p>
+     * TODO: Verify column names AUVARA (code) and AUOPIS (description) against the actual IVASDET DDL.
      */
     public TaxPayerTypesResponse getTaxPayerTypes(String mandatorId, String companyId) {
-        log.info("Fetching taxpayer types for mandatorId={}, companyId={}", mandatorId, companyId);
-
-        // TODO: Replace with AS400 DB2 call
-        List<TaxPayerType> dummyTypes = List.of(
-                TaxPayerType.builder()
-                        .taxPayerCode("01")
-                        .taxPayerDescription("Manufacturer (Proizvođač)")
-                        .selected(false)
-                        .build(),
-                TaxPayerType.builder()
-                        .taxPayerCode("02")
-                        .taxPayerDescription("Trader (Trgovac)")
-                        .selected(true)
-                        .build(),
-                TaxPayerType.builder()
-                        .taxPayerCode("03")
-                        .taxPayerDescription("Registered Trader (Registrirani trgovac)")
-                        .selected(false)
-                        .build()
-        );
-
+        log.info("Fetching taxpayer types from AS400 for mandatorId={}, companyId={}", mandatorId, companyId);
+        List<TaxPayerType> types = as400Repository.fetchTaxPayerTypes();
         return TaxPayerTypesResponse.builder()
-                .taxPayerTypes(dummyTypes)
+                .taxPayerTypes(types)
                 .build();
     }
 
@@ -171,6 +161,32 @@ public class TaxPayerService {
         return PreviewExistingResponse.builder()
                 .taxPayerType(selectedType)
                 .mimvProcessed(processed)
+                .build();
+    }
+
+    /**
+     * Returns a list of vehicle brands from AS400 DB2.
+     * <p>
+     * Query: SELECT CHYSAA, CHL6AQ FROM IVASXT.KLCHCPP
+     */
+    public BrandsResponse getBrands(String mandatorId, String companyId) {
+        log.info("Fetching vehicle brands from AS400 for mandatorId={}, companyId={}", mandatorId, companyId);
+        List<Brand> brands = as400Repository.fetchBrands();
+        return BrandsResponse.builder()
+                .brands(brands)
+                .build();
+    }
+
+    /**
+     * Returns a list of tax offices from AS400 DB2.
+     * <p>
+     * Query: SELECT CIYTAA, CIL7AQ FROM IVASXT.KLCICPP
+     */
+    public TaxOfficesResponse getTaxOffices(String mandatorId, String companyId) {
+        log.info("Fetching tax offices from AS400 for mandatorId={}, companyId={}", mandatorId, companyId);
+        List<TaxOffice> offices = as400Repository.fetchTaxOffices();
+        return TaxOfficesResponse.builder()
+                .taxOffices(offices)
                 .build();
     }
 }

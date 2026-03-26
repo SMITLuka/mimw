@@ -83,5 +83,37 @@ public class TaxPayerController {
         PreviewExistingResponse response = taxPayerService.getPreviewExisting(mandatorId, companyId);
         return ResponseEntity.ok(ApiResponse.ok(response, "Existing preview fetched successfully."));
     }
+
+    /**
+     * GET /mimv/brands
+     *
+     * Returns a list of vehicle brands.
+     *
+     * Required headers: mandatorId, companyId
+     */
+    @GetMapping("/brands")
+    public ResponseEntity<ApiResponse<BrandsResponse>> getBrands(
+            @RequestHeader("mandatorId") String mandatorId,
+            @RequestHeader("companyId") String companyId) {
+
+        BrandsResponse response = taxPayerService.getBrands(mandatorId, companyId);
+        return ResponseEntity.ok(ApiResponse.ok(response, "Brands fetched successfully."));
+    }
+
+    /**
+     * GET /mimv/tax/offices
+     *
+     * Returns a list of tax offices.
+     *
+     * Required headers: mandatorId, companyId
+     */
+    @GetMapping("/tax/offices")
+    public ResponseEntity<ApiResponse<TaxOfficesResponse>> getTaxOffices(
+            @RequestHeader("mandatorId") String mandatorId,
+            @RequestHeader("companyId") String companyId) {
+
+        TaxOfficesResponse response = taxPayerService.getTaxOffices(mandatorId, companyId);
+        return ResponseEntity.ok(ApiResponse.ok(response, "Tax offices fetched successfully."));
+    }
 }
 

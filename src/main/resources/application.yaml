@@ -2,12 +2,16 @@ spring:
   application:
     name: mimw
 
-  # TODO: Kada se spoji AS400 DB2, odkomentirati i ukloniti exclude iz MimwApplication.java:
-  # datasource:
-  #   url: jdbc:as400://AS400_HOST/LIBRARY_NAME
-  #   username: USERNAME
-  #   password: PASSWORD
-  #   driver-class-name: com.ibm.as400.access.AS400JDBCDriver
+  datasource:
+    url: jdbc:as400://172.19.237.6
+    username: msecofr
+    # Password is computed dynamically as MMYY (e.g. March 2026 = "0326").
+    # Override with env var SPRING_DATASOURCE_PASSWORD if needed.
+    driver-class-name: com.ibm.as400.access.AS400JDBCDriver
+    hikari:
+      connection-timeout: 30000
+      maximum-pool-size: 5
+      minimum-idle: 1
 
 server:
   port: ${PORT:8081}
