@@ -9,16 +9,18 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
 import javax.sql.DataSource;
-import java.time.LocalDate;
 
 /**
- * Configures the AS400 DataSource.
+ * Configures the datasource.
  *
- * Password convention: CDP + MMYY — e.g. March 2026 → "CDP0326", April 2026 → "CDP0426".
- * The password is computed at application startup. If the app runs across a
- * month boundary, restart it so a fresh connection pool picks up the new password.
+  * On Render: connects to SQL Server (Pantheon DB), which in turn reaches
+ * AS400 via a configured Linked Server — no direct AS400 exposure needed.
  *
- * To override the dynamic password set environment variable SPRING_DATASOURCE_PASSWORD.
+ * Required env vars on Render:
+ *   SPRING_DATASOURCE_URL      — jdbc:sqlserver://HOST:1433;databaseName=DB;encrypt=true;trustServerCertificate=true
+ *   SPRING_DATASOURCE_USERNAME — SQL Server username
+ *   SPRING_DATASOURCE_PASSWORD — SQL Server password
+ *   AS400_LINKED_SERVER        — Linked server name (or leave blank to auto-read from _cdp_param)
  */
 @Configuration
 public class As400Config {
@@ -31,37 +33,21 @@ public class As400Config {
     @Value("${spring.datasource.username}")
     private String username;
 
-    /** Optional manual override — if blank/absent the password is computed dynamically. */
     @Value("${spring.datasource.password:}")
-    private String passwordOverride;
+    private String password;
+
+    @Value("${spring.datasource.driver-class-name}")
+    private String driverClassName;
 
     @Bean
     @Primary
-    public DataSource as400DataSource() {
-        // Ensure JT400 never attempts to open a Swing GUI dialog in a headless environment.
-        // This complements the "prompt=false" in the JDBC URL as a safety net.
-        System.setProperty("java.awt.headless", "true");
-
-        String password = (passwordOverride != null && !passwordOverride.isBlank())
-                ? passwordOverride
-                : resolvePassword();
-
-        log.info("AS400 DataSource configured → url={}, username={}, passwordMonth={}",
-                url, username, LocalDate.now().getMonthValue());
-
+    public DataSource dataSource() {
+        log.info("DataSource configured → driver={}, url={}, username={}", driverClassName, url, username);
         return DataSourceBuilder.create()
                 .url(url)
                 .username(username)
                 .password(password)
-                .driverClassName("com.ibm.as400.access.AS400JDBCDriver")
+                .driverClassName(driverClassName)
                 .build();
-    }
-
-    /**
-     * Computes the current password as CDP + MMYY (e.g. March 2026 = "CDP0326").
-     */
-    public static String resolvePassword() {
-        LocalDate now = LocalDate.now();
-        return String.format("CDP%02d%02d", now.getMonthValue(), now.getYear() % 100);
     }
 }

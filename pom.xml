@@ -39,11 +39,17 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
-        <!-- AS400 / iSeries JT400 JDBC driver -->
+        <!-- AS400 / iSeries JT400 JDBC driver (direct connection fallback) -->
         <dependency>
             <groupId>net.sf.jt400</groupId>
             <artifactId>jt400</artifactId>
             <version>20.0.7</version>
+        </dependency>
+        <!-- SQL Server JDBC driver (used on Render via Pantheon linked server) -->
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <version>12.6.3.jre11</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

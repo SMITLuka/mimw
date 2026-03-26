@@ -3,30 +3,30 @@ spring:
     name: mimw
 
   datasource:
-    # prompt=false  → prevents JT400 from opening a Swing GUI dialog on auth failure
-    # naming=sql    → use SQL-style schema.table naming (vs AS400 system naming schema/table)
-    # errors=full   → full error messages from AS400
-    # keepAlive=true → keeps connection alive
-    # loginTimeout=60 → timeout for initial connection (seconds)
-    # Override the entire URL with env var SPRING_DATASOURCE_URL if needed
-    url: ${SPRING_DATASOURCE_URL:jdbc:as400://212.91.124.230;prompt=false;naming=sql;errors=full;keepAlive=true;loginTimeout=60}
-    username: ${SPRING_DATASOURCE_USERNAME:msecofr}
-    # Password is computed dynamically as MMYY (e.g. March 2026 = "0326").
-    # Override with env var SPRING_DATASOURCE_PASSWORD if needed.
-    driver-class-name: com.ibm.as400.access.AS400JDBCDriver
+    # --- SQL Server (Pantheon) via Linked Server to AS400 ---
+    # Set these env vars on Render:
+    #   SPRING_DATASOURCE_URL      = jdbc:sqlserver://SQL_SERVER_IP:1433;databaseName=PANTHEON_DB;encrypt=true;trustServerCertificate=true
+    #   SPRING_DATASOURCE_USERNAME = sql_server_username
+    #   SPRING_DATASOURCE_PASSWORD = sql_server_password
+    url: ${SPRING_DATASOURCE_URL:jdbc:sqlserver://localhost:1433;databaseName=master;encrypt=true;trustServerCertificate=true}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER:com.microsoft.sqlserver.jdbc.SQLServerDriver}
     hikari:
       connection-timeout: 60000
       maximum-pool-size: 5
       minimum-idle: 0
       idle-timeout: 300000
       max-lifetime: 600000
-      validation-timeout: 5000
-      leak-detection-threshold: 60000
-      # Allow the app to start even if AS400 is unreachable at boot time
-      # (e.g. Render deployment where AS400 is on a private network).
-      # Connections will be established lazily on first request.
       initialization-fail-timeout: -1
+
+# --- AS400 Linked Server config ---
+# AS400_LINKED_SERVER: name of the linked server in SQL Server (from _cdp_param.aclinkserver)
+#                      Leave blank to auto-read from _cdp_param table at startup.
+# AS400_CATALOG:       AS400 database/catalog name (default: ADRIAVC1)
+as400:
+  linked-server: ${AS400_LINKED_SERVER:}
+  catalog: ${AS400_CATALOG:ADRIAVC1}
 
 server:
   port: ${PORT:8081}
-
