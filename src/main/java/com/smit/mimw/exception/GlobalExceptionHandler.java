@@ -3,10 +3,13 @@ package com.smit.mimw.exception;
 import com.smit.mimw.dto.ApiResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.sql.SQLException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -27,6 +30,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler({SQLException.class, DataAccessException.class})
+    public ResponseEntity<ApiResponse<Void>> handleDatabaseError(Exception ex) {
+        log.error("Database connection error: {}", ex.getMessage(), ex);
+        String message = "Greška u povezivanju sa bazom podataka. Provjerite mrežnu konfiguraciju.";
+        
+        if (ex.getMessage() != null && ex.getMessage().contains("timed out")) {
+            message = "Timeout pri povezivanju sa AS400 bazom podataka. Baza podataka nije dostupna sa ovog servera.";
+        }
+        
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(message));
     }
 
     @ExceptionHandler(Exception.class)

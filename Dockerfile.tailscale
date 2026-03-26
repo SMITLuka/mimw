@@ -1,0 +1,34 @@
+# ---- Build stage ----
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /app
+COPY . .
+RUN chmod +x mvnw && ./mvnw clean package -DskipTests
+
+# ---- Run stage with Tailscale support ----
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+
+# Install Tailscale and required dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    iproute2 \
+    iptables \
+    procps \
+    netcat-traditional \
+    && curl -fsSL https://tailscale.com/install.sh | sh \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy application
+COPY --from=build /app/target/Mimw-0.0.1-SNAPSHOT.war app.war
+
+# Copy startup script
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+EXPOSE 8081
+
+# Use startup script that initializes Tailscale before starting the app
+ENTRYPOINT ["/start.sh"]
+

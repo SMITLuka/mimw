@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  as400-proxy:
+    image: alpine/socat:latest
+    container_name: as400-proxy
+    restart: unless-stopped
+    ports:
+      - "8471:8471"
+    command: tcp-listen:8471,fork,reuseaddr tcp-connect:172.19.237.6:8471
+    environment:
+      - TZ=Europe/Sarajevo
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Usage:
+# 1. Save this file as docker-compose.yml
+# 2. Run: docker-compose up -d
+# 3. That's it! Proxy is running
+#
+# Check logs: docker-compose logs -f
+# Stop: docker-compose down
+# Restart: docker-compose restart
+
