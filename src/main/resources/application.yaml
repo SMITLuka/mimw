@@ -2,14 +2,21 @@ spring:
   application:
     name: mimw
 
+  security:
+    user:
+      name: ${SPRING_SECURITY_USER_NAME:admin}
+      password: ${SPRING_SECURITY_USER_PASSWORD:changeme}
+
   datasource:
     # --- SQL Server (Pantheon) via Linked Server to AS400 ---
     # Set these env vars on Render:
     #   SPRING_DATASOURCE_URL      = jdbc:sqlserver://SQL_SERVER_IP:1433;databaseName=PANTHEON_DB;encrypt=true;trustServerCertificate=true
     #   SPRING_DATASOURCE_USERNAME = sql_server_username
     #   SPRING_DATASOURCE_PASSWORD = sql_server_password
-    url: ${SPRING_DATASOURCE_URL:jdbc:sqlserver://localhost:1433;databaseName=master;encrypt=true;trustServerCertificate=true}
-    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    # Local dev: integratedSecurity=true uses your Windows session (same as Pantheon Client)
+    # Render/prod: override SPRING_DATASOURCE_URL with a SQL login URL + set USERNAME/PASSWORD env vars
+    url: ${SPRING_DATASOURCE_URL:jdbc:sqlserver://141.138.12.247:1666;databaseName=PPMVPROGRAM;encrypt=true;trustServerCertificate=true;integratedSecurity=true}
+    username: ${SPRING_DATASOURCE_USERNAME:}
     password: ${SPRING_DATASOURCE_PASSWORD:}
     driver-class-name: ${SPRING_DATASOURCE_DRIVER:com.microsoft.sqlserver.jdbc.SQLServerDriver}
     hikari:

@@ -1,6 +1,7 @@
 package com.smit.mimw.repository;
 
 import com.smit.mimw.dto.Brand;
+import com.smit.mimw.dto.KlcfcppRecord;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.dto.TaxPayerType;
 import jakarta.annotation.PostConstruct;
@@ -10,6 +11,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -146,6 +150,87 @@ public class As400Repository {
             }
             return result;
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // KLCFCPP — MI-MV form headers (MVMZP Zaglavlje) — library IVAS0000B0
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fetches rows from IVAS0000B0.KLCFCPP.
+     *
+     * @param companyCode  CFNSRO value (6-char company code, e.g. "000080"). Pass null to skip filter.
+     * @param dateFrom     filter: CFI3AG (RazdobljeOd) >= dateFrom (YYYYMMDD). Pass null to skip.
+     * @param dateTo       filter: CFI4AG (RazdobljeDo) <= dateTo (YYYYMMDD). Pass null to skip.
+     */
+    public List<KlcfcppRecord> fetchKlcfcpp(String companyCode, LocalDate dateFrom, LocalDate dateTo) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT CFYQAA, CFYPAA, CFRIDX, CFNSRO, CFMSTS, CFLTAQ, CFLSAQ, CFLRAQ," +
+                " CFLQAQ, CFLPAQ, CFLOAQ, CFLNAQ, CFLMAQ, CFKRAQ, CFKQAQ," +
+                " CFIZAU, CFIYAU, CFI6AG, CFI5AG, CFI4AG, CFI3AG, CFI2AG, CFI1AG, CFI0AG," +
+                " CFFSDG, CFFRDG, CFB4SB FROM ");
+        sql.append(table("IVAS0000B0", "KLCFCPP"));
+
+        List<Object> params = new ArrayList<>();
+
+        if (companyCode != null && !companyCode.isBlank()) {
+            sql.append(" WHERE CFNSRO = ?");
+            params.add(companyCode);
+        }
+        if (dateFrom != null) {
+            sql.append(params.isEmpty() ? " WHERE" : " AND");
+            sql.append(" CFI3AG >= ?");
+            params.add(Integer.parseInt(dateFrom.format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        }
+        if (dateTo != null) {
+            sql.append(params.isEmpty() ? " WHERE" : " AND");
+            sql.append(" CFI4AG <= ?");
+            params.add(Integer.parseInt(dateTo.format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
+        }
+
+        log.debug("fetchKlcfcpp SQL: {}", sql);
+
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) ->
+                KlcfcppRecord.builder()
+                        .sifraObrascaPP(trim(rs.getString("CFYQAA")))
+                        .oibObveznika(trim(rs.getString("CFYPAA")))
+                        .sifraKorisnika(trim(rs.getString("CFRIDX")))
+                        .sifraPoduzecea(trim(rs.getString("CFNSRO")))
+                        .statusSloga(trim(rs.getString("CFMSTS")))
+                        .carinskiUredOpis(trim(rs.getString("CFLTAQ")))
+                        .identifikator(trim(rs.getString("CFLSAQ")))
+                        .akcijaPP(trim(rs.getString("CFLRAQ")))
+                        .emailAdresa(trim(rs.getString("CFLQAQ")))
+                        .odgovornaOsoba(trim(rs.getString("CFLPAQ")))
+                        .sjedisteObveznika(trim(rs.getString("CFLOAQ")))
+                        .nazivObveznika(trim(rs.getString("CFLNAQ")))
+                        .carinskiUred(trim(rs.getString("CFLMAQ")))
+                        .tekstDodatni2(trim(rs.getString("CFKRAQ")))
+                        .tekstDodatni1(trim(rs.getString("CFKQAQ")))
+                        .iznosDodatni2(rs.getBigDecimal("CFIZAU"))
+                        .iznosDodatni1(rs.getBigDecimal("CFIYAU"))
+                        .ukIznosUplacenogPP(rs.getBigDecimal("CFI6AG"))
+                        .ukIznosPP(rs.getBigDecimal("CFI5AG"))
+                        .razdobljeDo(nullableInt(rs, "CFI4AG"))
+                        .razdobljeOd(nullableInt(rs, "CFI3AG"))
+                        .redniBrojPPPromjena(nullableInt(rs, "CFI2AG"))
+                        .redniBrojPP(nullableInt(rs, "CFI1AG"))
+                        .datumPP(nullableInt(rs, "CFI0AG"))
+                        .datumDodatni2(rs.getBigDecimal("CFFSDG"))
+                        .datumDodatni1(rs.getBigDecimal("CFFRDG"))
+                        .statusSloga2(trim(rs.getString("CFB4SB")))
+                        .build(),
+                params.toArray()
+        );
+    }
+
+    private static String trim(String s) {
+        return s != null ? s.trim() : null;
+    }
+
+    private static Integer nullableInt(java.sql.ResultSet rs, String col) throws java.sql.SQLException {
+        int v = rs.getInt(col);
+        return rs.wasNull() ? null : v;
     }
 
     private String extractDescription(String code, String[] fields) {

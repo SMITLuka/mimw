@@ -70,55 +70,58 @@ public class TaxPayerService {
     }
 
     /**
-     * Builds a MI-MV form with dummy data based on the request.
-     * <p>
-     * TODO: Replace with AS400 DB2 queries to fetch actual form and vehicle data.
+     * Builds a MI-MV form by fetching real data from IVAS0000B0.KLCFCPP.
+     *
+     * Filters applied:
+     *   - CFNSRO = companyId (6-char padded, e.g. "000080" for companyId "80")
+     *   - CFI3AG >= dateFrom  (period start, YYYYMMDD)
+     *   - CFI4AG <= dateTo    (period end,   YYYYMMDD)
      */
     public FormBuildResponse buildForm(String mandatorId, String companyId, FormBuildRequest request) {
         log.info("Building form for mandatorId={}, companyId={}, taxPayerCode={}, dateFrom={}, dateTo={}",
                 mandatorId, companyId, request.getTaxPayerCode(), request.getDateFrom(), request.getDateTo());
 
-        // TODO: Replace with AS400 DB2 calls to fetch real form header and vehicle rows
+        // Pad companyId to 6 chars if it's numeric (DB stores "000080" for company 80)
+        String companyCode = companyId;
+        if (companyId != null && companyId.matches("\\d+")) {
+            companyCode = String.format("%06d", Long.parseLong(companyId));
+        }
 
-        List<VehicleTaxItem> dummyVehicles = List.of(
-                VehicleTaxItem.builder()
-                        .id(1L)
-                        .status("NEW")
-                        .type("M1")
-                        .make("Volkswagen")
-                        .description("Golf 8 Style 1.5 TSI, automatic, silver metallic")
-                        .vin("WVWZZZ1KZMP012345")
-                        .fuelType("Petrol")
-                        .dateFirstRegistration(LocalDate.of(2026, 1, 15))
-                        .co2(126.0)
-                        .build(),
-                VehicleTaxItem.builder()
-                        .id(2L)
-                        .status("USED")
-                        .type("M1")
-                        .make("BMW")
-                        .description("320d xDrive, automatic, black")
-                        .vin("WBA8E1C05JA987654")
-                        .fuelType("Diesel")
-                        .dateFirstRegistration(LocalDate.of(2022, 6, 10))
-                        .co2(134.0)
-                        .build()
-        );
+        List<KlcfcppRecord> forms = as400Repository.fetchKlcfcpp(
+                companyCode, request.getDateFrom(), request.getDateTo());
+
+        log.info("Fetched {} KLCFCPP records for companyCode={}", forms.size(), companyCode);
+
+        // Derive header fields from first record (when available)
+        String companyDesc  = forms.isEmpty() ? ("Company " + companyId) : forms.get(0).getNazivObveznika();
+        String taxOfficeCode = request.getTaxOfficeCode() != null ? request.getTaxOfficeCode()
+                : (forms.isEmpty() ? null : forms.get(0).getCarinskiUred());
+        String taxOfficeDesc = request.getTaxOfficeDescription() != null ? request.getTaxOfficeDescription()
+                : (forms.isEmpty() ? null : forms.get(0).getCarinskiUredOpis());
+        String email = request.getDestinationEmail() != null ? request.getDestinationEmail()
+                : (forms.isEmpty() ? null : forms.get(0).getEmailAdresa());
+
+        // Sum totals across all fetched forms
+        BigDecimal totalPP = forms.stream()
+                .map(f -> f.getUkIznosPP() != null ? f.getUkIznosPP() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalPaid = forms.stream()
+                .map(f -> f.getUkIznosUplacenogPP() != null ? f.getUkIznosUplacenogPP() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         return FormBuildResponse.builder()
-                .id(1001L)
-                .dateFrom(request.getDateFrom() != null ? request.getDateFrom() : LocalDate.now().withDayOfMonth(1))
-                .dateTo(request.getDateTo() != null ? request.getDateTo() : LocalDate.now())
-                .taxNewVehiclesSum(new BigDecimal("4500.00"))
-                .taxUsedVehiclesSum(new BigDecimal("2100.00"))
+                .dateFrom(request.getDateFrom())
+                .dateTo(request.getDateTo())
+                .taxNewVehiclesSum(totalPP)
+                .taxUsedVehiclesSum(totalPaid)
                 .taxPayersTypeSelected(request.getTaxPayerCode())
                 .mandatorDescription("Mandator " + mandatorId)
-                .companyDescription("Company " + companyId)
-                .taxOfficeCode(request.getTaxOfficeCode())
-                .taxOfficeDescription(request.getTaxOfficeDescription())
-                .destinationEmail(request.getDestinationEmail())
+                .companyDescription(companyDesc)
+                .taxOfficeCode(taxOfficeCode)
+                .taxOfficeDescription(taxOfficeDesc)
+                .destinationEmail(email)
                 .isUsed(false)
-                .vehiclesToTax(dummyVehicles)
+                .forms(forms)
                 .build();
     }
 
