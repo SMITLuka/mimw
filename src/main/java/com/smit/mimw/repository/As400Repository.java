@@ -62,10 +62,15 @@ public class As400Repository {
                 if (ls != null && !ls.isBlank()) {
                     linkedServer = ls.trim();
                     log.info("Loaded linked server name from _cdp_param: '{}'", linkedServer);
+                } else {
+                    log.error("_cdp_param.aclinkserver is empty. " +
+                              "AS400 is only reachable via Pantheon SQL Server linked server. " +
+                              "Set env var AS400_LINKED_SERVER or populate _cdp_param.aclinkserver.");
                 }
             } catch (Exception e) {
-                log.warn("Could not read linked server from _cdp_param ({}). " +
-                         "Falling back to direct AS400 naming.", e.getMessage());
+                log.error("Could not read linked server from _cdp_param ({}). " +
+                          "AS400 is only reachable via Pantheon SQL Server linked server. " +
+                          "Set env var AS400_LINKED_SERVER.", e.getMessage());
             }
         } else {
             log.info("Using linked server from env var: '{}'", linkedServer);
@@ -75,8 +80,10 @@ public class As400Repository {
     /**
      * Builds the fully qualified table reference.
      *
-     * With linked server:   [linkedServer].[catalog].[library].[table]
-     * Without linked server: library.table  (direct AS400 JDBC)
+     * Connection is always to Pantheon SQL Server; AS400 is accessed via linked server.
+     *
+     * With linked server:    [linkedServer].[catalog].[library].[table]
+     * Without linked server: library.table  (fallback — AS400 unreachable without linked server)
      */
     private String table(String library, String table) {
         if (linkedServer == null || linkedServer.isBlank()) {
@@ -244,11 +251,15 @@ public class As400Repository {
      * @return trimmed 11-digit OIB string, or {@code null} if not found / on error
      */
     public String fetchOib() {
+        // OIB is at fixed offset 324, length 11 inside the HDBINHALT field.
         // fields before OIB (each padded to fixed length):
         // name1(30) + name2(30) + street(30) + country+zip(13) + city(21)
         // + phone1(20) + phone2(20) + fax(20) + bank(30) + bankstreet(30)
         // + iban(35) + blank(16) + pp(20) + blank(8)  →  offset 324, length 11
-        String sql = "SELECT trim(substr(HDBINHALT, 324, 11)) AS OIB FROM "
+        //
+        // NOTE: query goes through SQL Server 4-part linked-server name,
+        // so SQL Server syntax must be used: SUBSTRING (not DB2 substr).
+        String sql = "SELECT TRIM(SUBSTRING(HDBINHALT, 324, 11)) AS OIB FROM "
                 + table("KB0D1", "HDB") + " WHERE HDBSART = 'BEN'";
         log.debug("fetchOib SQL: {}", sql);
         try {
@@ -379,8 +390,13 @@ public class As400Repository {
     // -------------------------------------------------------------------------
 
     /**
-     * Loads a SQL file from the classpath, strips comment lines, and replaces
-     * the 9 standard placeholders with the provided values.
+     * Loads a SQL file from the classpath, strips comment lines, replaces
+     * the 9 standard placeholders with the provided values, and — when a
+     * SQL Server linked server is configured — wraps the result in a
+     * pass-through {@code EXEC('...') AT [linkedServer]} call so that
+     * SQL Server does NOT parse the DB2-native syntax
+     * ({@code ifnull}, {@code isnumericdec}, {@code datefmt},
+     * {@code sysibm.sysdummy1}, etc.).
      */
     private String loadAndReplacePlaceholders(String resourcePath,
                                               String mandatorId, String oib, String formDate,
@@ -394,8 +410,7 @@ public class As400Repository {
             // Strip SQL comment lines (lines starting with --)
             StringBuilder sb = new StringBuilder();
             for (String line : raw.split("\n")) {
-                String trimmed = line.trim();
-                if (!trimmed.startsWith("--")) {
+                if (!line.trim().startsWith("--")) {
                     sb.append(line).append("\n");
                 }
             }
@@ -411,7 +426,28 @@ public class As400Repository {
             sql = sql.replace("<DODATUMA>", dateTo);
             sql = sql.replace("<BRANCH>",   companyId != null ? companyId : "");
 
-            return sql.trim();
+            sql = sql.trim();
+
+            if (linkedServer != null && !linkedServer.isBlank()) {
+                // ----------------------------------------------------------------
+                // SQL Server linked-server path:
+                // The INSERT SQL is DB2-native and contains functions that SQL
+                // Server does not recognise (ifnull, isnumericdec, datefmt, …).
+                // Wrapping with EXEC('…') AT [linkedServer] sends the string
+                // directly to AS400 for execution, bypassing SQL Server's parser.
+                //
+                // Single quotes inside the SQL must be doubled so the outer
+                // EXEC string literal is valid T-SQL.
+                // ----------------------------------------------------------------
+                String escaped = sql.replace("'", "''");
+                String passThrough = "EXEC('" + escaped + "') AT [" + linkedServer + "]";
+                log.debug("Using pass-through EXEC ... AT [{}] for {}", linkedServer, resourcePath);
+                return passThrough;
+            }
+
+            // Direct AS400/DB2 JDBC path — send DB2-native SQL as-is.
+            return sql;
+
         } catch (Exception e) {
             throw new RuntimeException("Failed to load SQL resource: " + resourcePath, e);
         }
