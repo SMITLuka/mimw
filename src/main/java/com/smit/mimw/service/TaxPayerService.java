@@ -116,63 +116,41 @@ public class TaxPayerService {
         // DEMO MODE — set DEMO_MODE = false when connecting to live AS400
         // ---------------------------------------------------------------
         if (DEMO_MODE) {
-            // Build composite id: demoOib-formDateDDMMYYYY-formTypeCode-seqNum-versionNum
-            // Example: 30985203273-01082014-405-01-001
-            String demoFormTypeCode = toSifobr(request.getTaxPayerCode());
-            String demoFormDate = request.getFormDate() != null
-                    ? request.getFormDate().format(DateTimeFormatter.ofPattern("ddMMyyyy")) : "00000000";
-            int demoSeq     = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
-            int demoVersion = request.getVersionNumber() != null ? request.getVersionNumber() : 1;
-            String demoId   = String.format("00000000000-%s-%s-%02d-%03d",
-                    demoFormDate, demoFormTypeCode != null ? demoFormTypeCode : "", demoSeq, demoVersion);
-
             return FormBuildResponse.builder()
-                    .id(demoId)
+                    .id("30985203273-01032026-401-01-001")
                     .dateFrom(LocalDate.of(2026, 3, 1))
                     .dateTo(LocalDate.of(2026, 3, 31))
                     .taxNewVehiclesSum(new BigDecimal("4500.00"))
                     .taxUsedVehiclesSum(new BigDecimal("2100.00"))
-                    .taxPayersTypeSelected(request.getTaxPayerCode() != null ? request.getTaxPayerCode() : "01")
-                    .mandatorDescription(mandatorId)
-                    .companyDescription(companyId)
-                    .companySeat("Ilica 1, 10000 Zagreb")
-                    .taxOfficeCode(request.getTaxOfficeCode())
-                    .taxOfficeDescription(request.getTaxOfficeDescription())
-                    .destinationEmail(request.getDestinationEmail())
+                    .taxPayersTypeSelected("01")
+                    .mandatorDescription("Mandator B9")
+                    .companyDescription("Company 001")
+                    .taxOfficeCode(null)
+                    .taxOfficeDescription(null)
+                    .destinationEmail(null)
                     .isUsed(false)
                     .vehiclesToTax(List.of(
                             VehicleTaxItem.builder()
                                     .vehicleCode(1)
-                                    .status("N")
+                                    .status("NEW")
                                     .vehicleType("M1")
-                                    .brandCode("VOL")
                                     .brandDescription("Volkswagen")
                                     .commercialDescription("Golf 8 Style 1.5 TSI, automatic, silver metallic")
                                     .vin("WVWZZZ1KZMP012345")
                                     .fuelType("Petrol")
-                                    .co2Emission(new BigDecimal("126"))
-                                    .enginePower(new BigDecimal("110"))
-                                    .sellingPrice(new BigDecimal("32000.00"))
-                                    .mileage(BigDecimal.ZERO)
-                                    .calculatedTaxAmount(new BigDecimal("4500.00"))
-                                    .dateFirstRegistration(new BigDecimal("20260115"))
+                                    .dateFirstRegistration(LocalDate.of(2026, 1, 15))
+                                    .co2Emission(new BigDecimal("126.0"))
                                     .build(),
                             VehicleTaxItem.builder()
                                     .vehicleCode(2)
-                                    .status("R")
+                                    .status("USED")
                                     .vehicleType("M1")
-                                    .brandCode("BMW")
                                     .brandDescription("BMW")
                                     .commercialDescription("320d xDrive, automatic, black")
                                     .vin("WBA8E1C05JA987654")
                                     .fuelType("Diesel")
-                                    .co2Emission(new BigDecimal("134"))
-                                    .enginePower(new BigDecimal("140"))
-                                    .sellingPrice(new BigDecimal("28000.00"))
-                                    .mileage(new BigDecimal("85000"))
-                                    .depreciation(new BigDecimal("35"))
-                                    .calculatedTaxAmount(new BigDecimal("2100.00"))
-                                    .dateFirstRegistration(new BigDecimal("20220610"))
+                                    .dateFirstRegistration(LocalDate.of(2022, 6, 10))
+                                    .co2Emission(new BigDecimal("134.0"))
                                     .build()
                     ))
                     .build();

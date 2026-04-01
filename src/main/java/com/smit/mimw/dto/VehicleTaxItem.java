@@ -1,11 +1,14 @@
 package com.smit.mimw.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /**
  * Combined vehicle tax item — data from KLCGCPP (MVMZP Detalj) + KMAQCPP (MI-MV Detalj),
@@ -15,23 +18,28 @@ import java.math.BigDecimal;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class VehicleTaxItem {
 
     // --- From KLCGCPP (MVMZP Detalj) ---
 
     /** CGJ3AG — SifraVozila (internal Pantheon vehicle key) */
+    @JsonProperty("id")
     private Integer vehicleCode;
 
-    /** CGLUAQ — VrstaVozila (vehicle type, e.g. "1") */
+    /** CGLUAQ — VrstaVozila (vehicle type, e.g. "M1") */
+    @JsonProperty("type")
     private String vehicleType;
 
-    /** CGYRAA — MarkaVozila code (brand code from KLCHCPP) */
+    /** CGYRAA — MarkaVozila code (brand code from KLCHCPP) — not exposed in API */
     private String brandCode;
 
-    /** CGLVAQ — MarkaVozilaOpis (brand description, e.g. "RENAULT") */
+    /** CGLVAQ — MarkaVozilaOpis (brand description, e.g. "Volkswagen") */
+    @JsonProperty("make")
     private String brandDescription;
 
     /** CGLWAQ — TipVarijantaTrgNaziv (type, variant and commercial name) */
+    @JsonProperty("description")
     private String commercialDescription;
 
     /** CGLXAQ — VinOznaka */
@@ -41,6 +49,7 @@ public class VehicleTaxItem {
     private String fuelType;
 
     /** CGI7AG — ProsjecnaEmisijaCO2 */
+    @JsonProperty("co2")
     private BigDecimal co2Emission;
 
     /** RazinaEmisije (emission level, e.g. "VI") */
@@ -90,11 +99,11 @@ public class VehicleTaxItem {
 
     // --- From KMAQCPP (MI-MV Detalj) ---
 
-    /** AQQWAQ — StatusVozila (N=new, R=used, NT=demo) */
+    /** AQQWAQ — StatusVozila (NEW=new, USED=used) */
     private String status;
 
-    /** AQSBAG — DatumPrveRegistracije (first registration date, YYYYMMDD) */
-    private BigDecimal dateFirstRegistration;
+    /** AQSBAG — DatumPrveRegistracije (first registration date) */
+    private LocalDate dateFirstRegistration;
 
     /** AQSCAG — SnagaMotora (engine power in kW) */
     private BigDecimal enginePower;

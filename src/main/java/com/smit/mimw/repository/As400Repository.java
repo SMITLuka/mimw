@@ -372,7 +372,7 @@ public class As400Repository {
                         .paymentDate(nullableInt(rs, "CGJGAG"))
                         // KMAQCPP fields
                         .status(trim(rs.getString("AQQWAQ")))
-                        .dateFirstRegistration(rs.getBigDecimal("AQSBAG"))
+                        .dateFirstRegistration(parseYyyymmddDate(rs, "AQSBAG"))
                         .enginePower(rs.getBigDecimal("AQSCAG"))
                         .sellingPrice(rs.getBigDecimal("AQSDAG"))
                         .mileage(rs.getBigDecimal("AQSEAG"))
@@ -460,6 +460,20 @@ public class As400Repository {
     private static Integer nullableInt(java.sql.ResultSet rs, String col) throws java.sql.SQLException {
         int v = rs.getInt(col);
         return rs.wasNull() ? null : v;
+    }
+
+    /**
+     * Reads an integer column stored as YYYYMMDD and converts it to a {@link LocalDate}.
+     * Returns {@code null} if the column is null or the value is 0.
+     */
+    private static LocalDate parseYyyymmddDate(java.sql.ResultSet rs, String col) throws java.sql.SQLException {
+        int v = rs.getInt(col);
+        if (rs.wasNull() || v == 0) return null;
+        try {
+            return LocalDate.of(v / 10000, (v / 100) % 100, v % 100);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String extractDescription(String code, String[] fields) {
