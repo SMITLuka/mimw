@@ -24,10 +24,16 @@ public class TaxPayerService {
     private static final Logger log = LoggerFactory.getLogger(TaxPayerService.class);
 
     /**
+     * Set to {@code true} to return hardcoded demo data without touching AS400.
+     * Set to {@code false} to run the real insert + select flow against live data.
+     */
+    private static final boolean DEMO_MODE = true;
+
+    /**
      * Maps Pantheon taxpayer-type codes to their numeric MI-MV form-type codes (SifraObrascaPP).
      * <ul>
-     *   <li>MV02 → 401 — passenger car / motorcycle dealers (HFSFZGART: N, V)</li>
-     *   <li>MV03 → 405 — quad / ATV dealers            (HFSFZGART: A, G)</li>
+     *   <li>MV02 -&gt; 401 — passenger car / motorcycle dealers (HFSFZGART: N, V)</li>
+     *   <li>MV03 -&gt; 405 — quad / ATV dealers (HFSFZGART: A, G)</li>
      * </ul>
      */
     private static final Map<String, String> SIFOBR_BY_TAX_CODE = Map.of(
@@ -106,6 +112,75 @@ public class TaxPayerService {
         log.info("Building form for mandatorId={}, companyId={}, taxPayerCode={}, dateFrom={}, dateTo={}",
                 mandatorId, companyId, request.getTaxPayerCode(), request.getDateFrom(), request.getDateTo());
 
+        // ---------------------------------------------------------------
+        // DEMO MODE — set DEMO_MODE = false when connecting to live AS400
+        // ---------------------------------------------------------------
+        if (DEMO_MODE) {
+            // Build composite id: demoOib-formDateDDMMYYYY-formTypeCode-seqNum-versionNum
+            // Example: 30985203273-01082014-405-01-001
+            String demoFormTypeCode = toSifobr(request.getTaxPayerCode());
+            String demoFormDate = request.getFormDate() != null
+                    ? request.getFormDate().format(DateTimeFormatter.ofPattern("ddMMyyyy")) : "00000000";
+            int demoSeq     = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
+            int demoVersion = request.getVersionNumber() != null ? request.getVersionNumber() : 1;
+            String demoId   = String.format("00000000000-%s-%s-%02d-%03d",
+                    demoFormDate, demoFormTypeCode != null ? demoFormTypeCode : "", demoSeq, demoVersion);
+
+            return FormBuildResponse.builder()
+                    .id(demoId)
+                    .dateFrom(LocalDate.of(2026, 3, 1))
+                    .dateTo(LocalDate.of(2026, 3, 31))
+                    .taxNewVehiclesSum(new BigDecimal("4500.00"))
+                    .taxUsedVehiclesSum(new BigDecimal("2100.00"))
+                    .taxPayersTypeSelected(request.getTaxPayerCode() != null ? request.getTaxPayerCode() : "01")
+                    .mandatorDescription(mandatorId)
+                    .companyDescription(companyId)
+                    .companySeat("Ilica 1, 10000 Zagreb")
+                    .taxOfficeCode(request.getTaxOfficeCode())
+                    .taxOfficeDescription(request.getTaxOfficeDescription())
+                    .destinationEmail(request.getDestinationEmail())
+                    .isUsed(false)
+                    .vehiclesToTax(List.of(
+                            VehicleTaxItem.builder()
+                                    .vehicleCode(1)
+                                    .status("N")
+                                    .vehicleType("M1")
+                                    .brandCode("VOL")
+                                    .brandDescription("Volkswagen")
+                                    .commercialDescription("Golf 8 Style 1.5 TSI, automatic, silver metallic")
+                                    .vin("WVWZZZ1KZMP012345")
+                                    .fuelType("Petrol")
+                                    .co2Emission(new BigDecimal("126"))
+                                    .enginePower(new BigDecimal("110"))
+                                    .sellingPrice(new BigDecimal("32000.00"))
+                                    .mileage(BigDecimal.ZERO)
+                                    .calculatedTaxAmount(new BigDecimal("4500.00"))
+                                    .dateFirstRegistration(new BigDecimal("20260115"))
+                                    .build(),
+                            VehicleTaxItem.builder()
+                                    .vehicleCode(2)
+                                    .status("R")
+                                    .vehicleType("M1")
+                                    .brandCode("BMW")
+                                    .brandDescription("BMW")
+                                    .commercialDescription("320d xDrive, automatic, black")
+                                    .vin("WBA8E1C05JA987654")
+                                    .fuelType("Diesel")
+                                    .co2Emission(new BigDecimal("134"))
+                                    .enginePower(new BigDecimal("140"))
+                                    .sellingPrice(new BigDecimal("28000.00"))
+                                    .mileage(new BigDecimal("85000"))
+                                    .depreciation(new BigDecimal("35"))
+                                    .calculatedTaxAmount(new BigDecimal("2100.00"))
+                                    .dateFirstRegistration(new BigDecimal("20220610"))
+                                    .build()
+                    ))
+                    .build();
+        }
+        // ---------------------------------------------------------------
+        // END DEMO MODE
+        // ---------------------------------------------------------------
+
         // --- 1. Resolve placeholder values ---
 
         String oib = as400Repository.fetchOib();
@@ -175,7 +250,7 @@ public class TaxPayerService {
                 .taxNewVehiclesSum(totalPP)
                 .taxUsedVehiclesSum(totalPaid)
                 .taxPayersTypeSelected(request.getTaxPayerCode())
-                .mandatorDescription("Mandator " + mandatorId)
+                .mandatorDescription(mandatorId)
                 .companyDescription(companyDesc)
                 .companySeat(companySeat)
                 .taxOfficeCode(taxOfficeCode)
