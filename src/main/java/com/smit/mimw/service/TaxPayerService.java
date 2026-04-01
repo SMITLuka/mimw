@@ -8,7 +8,9 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Service for taxpayer type and form-build operations.
@@ -20,6 +22,24 @@ import java.util.List;
 public class TaxPayerService {
 
     private static final Logger log = LoggerFactory.getLogger(TaxPayerService.class);
+
+    /**
+     * Maps Pantheon taxpayer-type codes to their numeric MI-MV form-type codes (SifraObrascaPP).
+     * <ul>
+     *   <li>MV02 → 401 — passenger car / motorcycle dealers (HFSFZGART: N, V)</li>
+     *   <li>MV03 → 405 — quad / ATV dealers            (HFSFZGART: A, G)</li>
+     * </ul>
+     */
+    private static final Map<String, String> SIFOBR_BY_TAX_CODE = Map.of(
+            "MV02", "401",
+            "MV03", "405"
+    );
+
+    /** Returns the numeric SifraObrascaPP for the given taxPayerCode, or {@code null} if unknown. */
+    private static String toSifobr(String taxPayerCode) {
+        if (taxPayerCode == null) return null;
+        return SIFOBR_BY_TAX_CODE.get(taxPayerCode.toUpperCase());
+    }
 
     private final As400Repository as400Repository;
 
@@ -70,46 +90,86 @@ public class TaxPayerService {
     }
 
     /**
-     * Builds a MI-MV form by fetching real data from IVAS0000B0.KLCFCPP.
+     * Builds a MI-MV form:
+     * <ol>
+     *   <li>Resolve placeholders: OIB (from KB0D1.HDB), SIFOBR (from taxPayerCode mapping)</li>
+     *   <li>Execute INSERT INTO KLCGCPP (MVMZP Detalj) — replace SQL placeholders with real values</li>
+     *   <li>Execute INSERT INTO KMAQCPP (MI-MV Detalj) — replace SQL placeholders with real values</li>
+     *   <li>SELECT from KLCFCPP (zaglavlje) to fill response header</li>
+     *   <li>SELECT from KLCGCPP + KMAQCPP (joined on vehicleCode) to fill vehiclesToTax</li>
+     * </ol>
      *
-     * Filters applied:
-     *   - CFNSRO = companyId (6-char padded, e.g. "000080" for companyId "80")
-     *   - CFI3AG >= dateFrom  (period start, YYYYMMDD)
-     *   - CFI4AG <= dateTo    (period end,   YYYYMMDD)
+     * Composite ID format: {@code oib-formDate-formTypeCode-sequentialNumber-versionNumber}
+     * <br>Example: {@code 30985203273-01082014-405-01-001}
      */
     public FormBuildResponse buildForm(String mandatorId, String companyId, FormBuildRequest request) {
         log.info("Building form for mandatorId={}, companyId={}, taxPayerCode={}, dateFrom={}, dateTo={}",
                 mandatorId, companyId, request.getTaxPayerCode(), request.getDateFrom(), request.getDateTo());
 
-        // Pad companyId to 6 chars if it's numeric (DB stores "000080" for company 80)
+        // --- 1. Resolve placeholder values ---
+
+        String oib = as400Repository.fetchOib();
+        log.info("Fetched OIB from KB0D1.HDB: {}", oib != null ? "***" : "null");
+
+        String formTypeCode = toSifobr(request.getTaxPayerCode());
+        log.info("Resolved formTypeCode '{}' from taxPayerCode '{}'", formTypeCode, request.getTaxPayerCode());
+
+        // Pad companyId to 6 chars if numeric (DB stores "000080" for company 80)
         String companyCode = companyId;
         if (companyId != null && companyId.matches("\\d+")) {
             companyCode = String.format("%06d", Long.parseLong(companyId));
         }
 
-        List<KlcfcppRecord> forms = as400Repository.fetchKlcfcpp(
-                companyCode, request.getDateFrom(), request.getDateTo());
+        DateTimeFormatter yyyyMMdd = DateTimeFormatter.ofPattern("yyyyMMdd");
+        String formDateStr   = request.getFormDate() != null ? request.getFormDate().format(yyyyMMdd) : "";
+        String dateFromStr   = request.getDateFrom() != null ? request.getDateFrom().format(yyyyMMdd) : "";
+        String dateToStr     = request.getDateTo()   != null ? request.getDateTo().format(yyyyMMdd)   : "";
+        int seqNum           = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
+        int versionNum       = request.getVersionNumber() != null ? request.getVersionNumber() : 1;
 
-        log.info("Fetched {} KLCFCPP records for companyCode={}", forms.size(), companyCode);
+        // --- 2. Execute INSERT INTO KLCGCPP (MVMZP Detalj) ---
+        as400Repository.executeInsertKlcgcpp(
+                mandatorId, oib, formDateStr, formTypeCode,
+                seqNum, versionNum, dateFromStr, dateToStr, companyId);
 
-        // Derive header fields from first record (when available)
-        String companyDesc  = forms.isEmpty() ? ("Company " + companyId) : forms.get(0).getNazivObveznika();
+        // --- 3. Execute INSERT INTO KMAQCPP (MI-MV Detalj) ---
+        as400Repository.executeInsertKmaqcpp(
+                mandatorId, oib, formDateStr, formTypeCode,
+                seqNum, versionNum, dateFromStr, dateToStr, companyId);
+
+        // --- 4. SELECT from KLCFCPP (zaglavlje) to fill response header ---
+        List<KlcfcppRecord> headers = as400Repository.fetchKlcfcpp(companyCode, request.getDateFrom(), request.getDateTo());
+        log.info("Fetched {} KLCFCPP header records for companyCode={}", headers.size(), companyCode);
+
+        String companyDesc   = headers.isEmpty() ? ("Company " + companyId)  : headers.get(0).getNazivObveznika();
+        String companySeat   = headers.isEmpty() ? null                      : headers.get(0).getSjedisteObveznika();
         String taxOfficeCode = request.getTaxOfficeCode() != null ? request.getTaxOfficeCode()
-                : (forms.isEmpty() ? null : forms.get(0).getCarinskiUred());
+                : (headers.isEmpty() ? null : headers.get(0).getCarinskiUred());
         String taxOfficeDesc = request.getTaxOfficeDescription() != null ? request.getTaxOfficeDescription()
-                : (forms.isEmpty() ? null : forms.get(0).getCarinskiUredOpis());
+                : (headers.isEmpty() ? null : headers.get(0).getCarinskiUredOpis());
         String email = request.getDestinationEmail() != null ? request.getDestinationEmail()
-                : (forms.isEmpty() ? null : forms.get(0).getEmailAdresa());
+                : (headers.isEmpty() ? null : headers.get(0).getEmailAdresa());
 
-        // Sum totals across all fetched forms
-        BigDecimal totalPP = forms.stream()
+        BigDecimal totalPP = headers.stream()
                 .map(f -> f.getUkIznosPP() != null ? f.getUkIznosPP() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalPaid = forms.stream()
+        BigDecimal totalPaid = headers.stream()
                 .map(f -> f.getUkIznosUplacenogPP() != null ? f.getUkIznosUplacenogPP() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        // --- 5. SELECT from KLCGCPP + KMAQCPP to fill vehiclesToTax ---
+        List<VehicleTaxItem> vehicles = as400Repository.fetchVehicleTaxItems(
+                mandatorId, oib, formDateStr, formTypeCode, seqNum, versionNum);
+        log.info("Fetched {} vehicle tax items", vehicles.size());
+
+        // Build composite identifier: oib-formDate-formTypeCode-seqNum-versionNum
+        // Example: 30985203273-01082014-405-01-001
+        String compositeId = String.format("%s-%s-%s-%02d-%03d",
+                oib != null ? oib : "", formDateStr, formTypeCode != null ? formTypeCode : "",
+                seqNum, versionNum);
+
         return FormBuildResponse.builder()
+                .id(compositeId)
                 .dateFrom(request.getDateFrom())
                 .dateTo(request.getDateTo())
                 .taxNewVehiclesSum(totalPP)
@@ -117,11 +177,12 @@ public class TaxPayerService {
                 .taxPayersTypeSelected(request.getTaxPayerCode())
                 .mandatorDescription("Mandator " + mandatorId)
                 .companyDescription(companyDesc)
+                .companySeat(companySeat)
                 .taxOfficeCode(taxOfficeCode)
                 .taxOfficeDescription(taxOfficeDesc)
                 .destinationEmail(email)
                 .isUsed(false)
-                .forms(forms)
+                .vehiclesToTax(vehicles)
                 .build();
     }
 

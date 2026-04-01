@@ -4,6 +4,7 @@ import com.smit.mimw.dto.Brand;
 import com.smit.mimw.dto.KlcfcppRecord;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.dto.TaxPayerType;
+import com.smit.mimw.dto.VehicleTaxItem;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -222,6 +223,198 @@ public class As400Repository {
                         .build(),
                 params.toArray()
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // OIB — from KB0D1.HDB where HDBSART = 'BEN'
+    // OIB is stored at fixed position 324, length 11, inside the HDBINHALT field.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fetches the taxpayer OIB from {@code KB0D1.HDB}.
+     * <p>
+     * The {@code HDBINHALT} column is a packed fixed-width text block.
+     * OIB occupies bytes 324–334 (1-based, length 11):
+     * <pre>
+     *   name1(30) + name2(30) + street(30) + country+zip(13) + city(21)
+     *   + phone1(20) + phone2(20) + fax(20) + bank(30) + bankstreet(30)
+     *   + iban(35) + blank(16) + pp(20) + blank(8)  →  offset 324
+     * </pre>
+     *
+     * @return trimmed 11-digit OIB string, or {@code null} if not found / on error
+     */
+    public String fetchOib() {
+        // fields before OIB (each padded to fixed length):
+        // name1(30) + name2(30) + street(30) + country+zip(13) + city(21)
+        // + phone1(20) + phone2(20) + fax(20) + bank(30) + bankstreet(30)
+        // + iban(35) + blank(16) + pp(20) + blank(8)  →  offset 324, length 11
+        String sql = "SELECT trim(substr(HDBINHALT, 324, 11)) AS OIB FROM "
+                + table("KB0D1", "HDB") + " WHERE HDBSART = 'BEN'";
+        log.debug("fetchOib SQL: {}", sql);
+        try {
+            List<String> results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("OIB"));
+            if (results.isEmpty()) {
+                log.warn("No BEN record found in KB0D1.HDB");
+                return null;
+            }
+            String oib = results.get(0);
+            return oib != null ? oib.trim() : null;
+        } catch (Exception e) {
+            log.warn("Could not fetch OIB from KB0D1.HDB: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // INSERT INTO KLCGCPP — MVMZP Detalj (sql/insert_klcgcpp.sql)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Executes the insert into IVAS&lt;mandatorId&gt;.KLCGCPP by loading
+     * {@code sql/insert_klcgcpp.sql} and replacing placeholders with real values.
+     */
+    public void executeInsertKlcgcpp(String mandatorId, String oib, String formDate,
+                                     String formTypeCode, int seqNum, int versionNum,
+                                     String dateFrom, String dateTo, String companyId) {
+        String sql = loadAndReplacePlaceholders("sql/insert_klcgcpp.sql",
+                mandatorId, oib, formDate, formTypeCode, seqNum, versionNum, dateFrom, dateTo, companyId);
+        log.debug("executeInsertKlcgcpp SQL (first 500 chars): {}", sql.substring(0, Math.min(500, sql.length())));
+        jdbcTemplate.execute(sql);
+        log.info("INSERT INTO KLCGCPP completed for mandator={}, oib={}", mandatorId, oib != null ? "***" : "null");
+    }
+
+    // -------------------------------------------------------------------------
+    // INSERT INTO KMAQCPP — MI-MV Detalj (sql/insert_kmaqcpp.sql)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Executes the insert into IVAS&lt;mandatorId&gt;.KMAQCPP by loading
+     * {@code sql/insert_kmaqcpp.sql} and replacing placeholders with real values.
+     */
+    public void executeInsertKmaqcpp(String mandatorId, String oib, String formDate,
+                                     String formTypeCode, int seqNum, int versionNum,
+                                     String dateFrom, String dateTo, String companyId) {
+        String sql = loadAndReplacePlaceholders("sql/insert_kmaqcpp.sql",
+                mandatorId, oib, formDate, formTypeCode, seqNum, versionNum, dateFrom, dateTo, companyId);
+        log.debug("executeInsertKmaqcpp SQL (first 500 chars): {}", sql.substring(0, Math.min(500, sql.length())));
+        jdbcTemplate.execute(sql);
+        log.info("INSERT INTO KMAQCPP completed for mandator={}, oib={}", mandatorId, oib != null ? "***" : "null");
+    }
+
+    // -------------------------------------------------------------------------
+    // SELECT vehicles from KLCGCPP + KMAQCPP (joined on SifraVozila)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fetches vehicle tax items by joining KLCGCPP (MVMZP Detalj) and KMAQCPP (MI-MV Detalj)
+     * on the common key columns (company, OIB, formDate, formTypeCode, seqNum, versionNum, vehicleCode).
+     */
+    public List<VehicleTaxItem> fetchVehicleTaxItems(String mandatorId, String oib, String formDate,
+                                                     String formTypeCode, int seqNum, int versionNum) {
+        String klcg = table("IVAS" + mandatorId, "KLCGCPP");
+        String kmaq = table("IVAS" + mandatorId, "KMAQCPP");
+
+        String sql = "SELECT " +
+                // KLCGCPP columns
+                "g.CGJ3AG, g.CGLUAQ, g.CGYRAA, g.CGLVAQ, g.CGLWAQ, g.CGLXAQ, g.CGLYAQ, " +
+                "g.CGI7AG, g.CGL2AQ, g.CGI8AG, g.CGL0AQ, g.CGI9AG, g.CGJAAG, g.CGJBAG, " +
+                "g.CGL1AQ, g.CGJDAG, g.CGL2AQ AS CAMPER_AQ, g.CGL3AQ, g.CGL4AQ, g.CGL5AQ, " +
+                "g.CGJEAG, g.CGJFAG, g.CGJGAG, " +
+                // KMAQCPP columns
+                "q.AQQWAQ, q.AQSBAG, q.AQSCAG, q.AQSDAG, q.AQSEAG, " +
+                "q.AQQXAQ, q.AQQYAQ, q.AQSFAG, q.AQSGAG, q.AQSHAG " +
+                "FROM " + klcg + " g " +
+                "LEFT JOIN " + kmaq + " q ON " +
+                "  g.CGNSRO = q.AQNSRO AND g.CGYPAA = q.AQYPAA AND g.CGI0AG = q.AQI0AG " +
+                "  AND g.CGYQAA = q.AQYQAA AND g.CGI1AG = q.AQI1AG AND g.CGI2AG = q.AQI2AG " +
+                "  AND g.CGJ3AG = q.AQJ3AG " +
+                "WHERE g.CGYPAA = ? AND g.CGI0AG = ? AND g.CGYQAA = ? AND g.CGI1AG = ? AND g.CGI2AG = ?";
+
+        log.debug("fetchVehicleTaxItems SQL: {}", sql);
+
+        return jdbcTemplate.query(sql,
+                new Object[]{oib, Integer.parseInt(formDate), formTypeCode, seqNum, versionNum},
+                (rs, rowNum) -> VehicleTaxItem.builder()
+                        // KLCGCPP fields
+                        .vehicleCode(nullableInt(rs, "CGJ3AG"))
+                        .vehicleType(trim(rs.getString("CGLUAQ")))
+                        .brandCode(trim(rs.getString("CGYRAA")))
+                        .brandDescription(trim(rs.getString("CGLVAQ")))
+                        .commercialDescription(trim(rs.getString("CGLWAQ")))
+                        .vin(trim(rs.getString("CGLXAQ")))
+                        .fuelType(trim(rs.getString("CGLYAQ")))
+                        .co2Emission(rs.getBigDecimal("CGI7AG"))
+                        .emissionLevel(trim(rs.getString("CGL2AQ")))
+                        .engineDisplacement(nullableInt(rs, "CGI8AG"))
+                        .complianceCertificateNumber(trim(rs.getString("CGL0AQ")))
+                        .taxBase(rs.getBigDecimal("CGI9AG"))
+                        .taxRate(rs.getBigDecimal("CGJAAG"))
+                        .specialTaxAmount(rs.getBigDecimal("CGJBAG"))
+                        .exemption(trim(rs.getString("CGL1AQ")))
+                        .plugIn(rs.getBigDecimal("CGJDAG"))
+                        .camper(trim(rs.getString("CAMPER_AQ")))
+                        .taxPayer(trim(rs.getString("CGL3AQ")))
+                        .taxPayerOib(trim(rs.getString("CGL4AQ")))
+                        .invoiceNumber(trim(rs.getString("CGL5AQ")))
+                        .invoiceDate(nullableInt(rs, "CGJEAG"))
+                        .paidTaxAmount(rs.getBigDecimal("CGJFAG"))
+                        .paymentDate(nullableInt(rs, "CGJGAG"))
+                        // KMAQCPP fields
+                        .status(trim(rs.getString("AQQWAQ")))
+                        .dateFirstRegistration(rs.getBigDecimal("AQSBAG"))
+                        .enginePower(rs.getBigDecimal("AQSCAG"))
+                        .sellingPrice(rs.getBigDecimal("AQSDAG"))
+                        .mileage(rs.getBigDecimal("AQSEAG"))
+                        .vehicle71(trim(rs.getString("AQQXAQ")))
+                        .vehicle81(trim(rs.getString("AQQYAQ")))
+                        .testVehicle(rs.getBigDecimal("AQSFAG"))
+                        .depreciation(rs.getBigDecimal("AQSGAG"))
+                        .calculatedTaxAmount(rs.getBigDecimal("AQSHAG"))
+                        .build()
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Helper: load SQL from classpath resource and replace placeholders
+    // -------------------------------------------------------------------------
+
+    /**
+     * Loads a SQL file from the classpath, strips comment lines, and replaces
+     * the 9 standard placeholders with the provided values.
+     */
+    private String loadAndReplacePlaceholders(String resourcePath,
+                                              String mandatorId, String oib, String formDate,
+                                              String formTypeCode, int seqNum, int versionNum,
+                                              String dateFrom, String dateTo, String companyId) {
+        try {
+            String raw = new String(
+                    getClass().getClassLoader().getResourceAsStream(resourcePath).readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+
+            // Strip SQL comment lines (lines starting with --)
+            StringBuilder sb = new StringBuilder();
+            for (String line : raw.split("\n")) {
+                String trimmed = line.trim();
+                if (!trimmed.startsWith("--")) {
+                    sb.append(line).append("\n");
+                }
+            }
+            String sql = sb.toString();
+
+            sql = sql.replace("<SIFPOD>",   mandatorId != null ? mandatorId : "");
+            sql = sql.replace("<OIB>",      oib != null ? oib : "");
+            sql = sql.replace("<DATUM>",    formDate);
+            sql = sql.replace("<SIFOBR>",   formTypeCode != null ? formTypeCode : "");
+            sql = sql.replace("<RBR>",      String.valueOf(seqNum));
+            sql = sql.replace("<RBRPROM>",  String.valueOf(versionNum));
+            sql = sql.replace("<ODDATUMA>", dateFrom);
+            sql = sql.replace("<DODATUMA>", dateTo);
+            sql = sql.replace("<BRANCH>",   companyId != null ? companyId : "");
+
+            return sql.trim();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load SQL resource: " + resourcePath, e);
+        }
     }
 
     private static String trim(String s) {
