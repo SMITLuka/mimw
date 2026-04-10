@@ -1,6 +1,7 @@
 package com.smit.mimw.repository;
 
 import com.smit.mimw.dto.Brand;
+import com.smit.mimw.dto.FormBuildResponse;
 import com.smit.mimw.dto.KlcfcppRecord;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.dto.TaxPayerType;
@@ -120,6 +121,80 @@ public class As400Repository {
                         .description(rs.getString("CHL6AQ") != null ? rs.getString("CHL6AQ").trim() : "")
                         .build()
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // mimv_zaglavlje — local MSSQL table (Pantheon DB), no linked server needed
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fetches the first row from the local MSSQL table {@code mimv_zaglavlje}
+     * and maps it to a {@link FormBuildResponse}.
+     *
+     * @return populated FormBuildResponse or {@code null} if table is empty
+     */
+    public FormBuildResponse fetchMimvZaglavlje() {
+        String sql = "SELECT TOP 1 " +
+                "oib_obveznika, identifikator, sifra_obrasca_pp, sifra_poduzeca, " +
+                "naziv_obveznika, sjediste_obveznika, kanali_ured_ope, " +
+                "email_adresa, odgovorna_osoba, akcija_pi, " +
+                "datum_pp, razdoblje_od, razdoblje_do, " +
+                "redni_broj_pp, redni_broj_pp_promjena, sifra_korisnika, " +
+                "uk_iznos_pp, uk_iznos_uplacenog_pp, " +
+                "iznos_dodatni1, iznos_dodatni2, " +
+                "datum_dodatni1, datum_dodatni2, " +
+                "tekst_dodatni1, tekst_dodatni2, " +
+                "status_sloga, status_sloga2 " +
+                "FROM mimv_zaglavlje";
+
+        log.debug("fetchMimvZaglavlje SQL: {}", sql);
+
+        List<FormBuildResponse> results = jdbcTemplate.query(sql, (rs, rowNum) -> {
+            String oib = trim(rs.getString("oib_obveznika"));
+
+            // razdoblje_od / razdoblje_do are numeric YYYYMMDD
+            Integer obdobljeOd = nullableInt(rs, "razdoblje_od");
+            Integer obdobljeDo = nullableInt(rs, "razdoblje_do");
+
+            LocalDate dateFrom = obdobljeOd != null ? toLocalDate(obdobljeOd) : null;
+            LocalDate dateTo = obdobljeDo != null ? toLocalDate(obdobljeDo) : null;
+
+            return FormBuildResponse.builder()
+                    .id(oib)
+                    .dateFrom(dateFrom)
+                    .dateTo(dateTo)
+                    .taxNewVehiclesSum(rs.getBigDecimal("uk_iznos_pp"))
+                    .taxUsedVehiclesSum(rs.getBigDecimal("uk_iznos_uplacenog_pp"))
+                    .taxPayersTypeSelected(trim(rs.getString("sifra_obrasca_pp")))
+                    .mandatorDescription(trim(rs.getString("sifra_poduzeca")))
+                    .companyDescription(trim(rs.getString("naziv_obveznika")))
+                    .companySeat(trim(rs.getString("sjediste_obveznika")))
+                    .taxOfficeCode(null)
+                    .taxOfficeDescription(trim(rs.getString("kanali_ured_ope")))
+                    .destinationEmail(trim(rs.getString("email_adresa")))
+                    .isUsed(false)
+                    .vehiclesToTax(List.of())
+                    .build();
+        });
+
+        if (results.isEmpty()) {
+            log.warn("mimv_zaglavlje is empty — no rows found");
+            return null;
+        }
+        return results.get(0);
+    }
+
+    /**
+     * Converts a YYYYMMDD integer to a {@link LocalDate}.
+     * Returns {@code null} if the value is 0 or invalid.
+     */
+    private static LocalDate toLocalDate(int yyyymmdd) {
+        if (yyyymmdd == 0) return null;
+        try {
+            return LocalDate.of(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // -------------------------------------------------------------------------
