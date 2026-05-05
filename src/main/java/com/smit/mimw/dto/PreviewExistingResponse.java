@@ -7,14 +7,15 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+/**
+ * Response for GET /mimv/preview/existing.
+ * Contains all existing MIMV_ZAGLAVLJE rows for the current company.
+ */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class PreviewExistingResponse {
 
-    private TaxPayerType taxPayerType;
     private List<MimvProcessedItem> mimvProcessed;
-
 }
-

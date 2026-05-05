@@ -1,0 +1,212 @@
+package com.smit.mimw.service;
+
+import com.smit.mimw.dto.BrandsResponse;
+import com.smit.mimw.dto.Brand;
+import com.smit.mimw.dto.FormBuildRequest;
+import com.smit.mimw.dto.FormBuildResponse;
+import com.smit.mimw.dto.IsSuccessResponse;
+import com.smit.mimw.dto.MimvProcessedItem;
+import com.smit.mimw.dto.PreviewExistingResponse;
+import com.smit.mimw.dto.TaxOffice;
+import com.smit.mimw.dto.TaxOfficesResponse;
+import com.smit.mimw.dto.TaxPayerType;
+import com.smit.mimw.dto.TaxPayerTypeRequest;
+import com.smit.mimw.dto.TaxPayerTypesResponse;
+import com.smit.mimw.repository.As400Repository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Service for all MIMV form operations.
+ * Orchestrates AS400 reads, Pantheon writes, and form lifecycle.
+ */
+@Service
+public class MimvFormService {
+
+    private static final Logger log = LoggerFactory.getLogger(MimvFormService.class);
+
+    private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.ofPattern("yyyyMMdd"); //$NON-NLS-1$
+
+    /**
+     * Maps Pantheon taxpayer-type codes to MI-MV form-type codes (SIFRA_OBRASCA_PP).
+     * MV02 -> 401: passenger cars / motorcycles (HFSFZGART: N, V)
+     * MV03 -> 405: quads / ATVs               (HFSFZGART: A, G)
+     */
+    private static final Map<String, String> SIFOBR_BY_TAX_CODE = Map.of(
+            "MV02", "401", //$NON-NLS-1$ //$NON-NLS-2$
+            "MV03", "405"  //$NON-NLS-1$ //$NON-NLS-2$
+    );
+
+    private final As400Repository as400Repository;
+
+    public MimvFormService(As400Repository as400Repository) {
+        this.as400Repository = as400Repository;
+    }
+
+    // -------------------------------------------------------------------------
+    // Taxpayer types
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns all MIMV taxpayer types from AS400.
+     */
+    public TaxPayerTypesResponse getTaxPayerTypes(String mandatorId, String companyId) {
+        log.info("Fetching taxpayer types from AS400 for mandatorId={}, companyId={}", mandatorId, companyId); //$NON-NLS-1$
+        List<TaxPayerType> types = as400Repository.fetchTaxPayerTypes();
+        return TaxPayerTypesResponse.builder()
+                .taxPayerTypes(types)
+                .build();
+    }
+
+    /**
+     * Saves taxpayer type selection.
+     * TODO: implement AS400 write when the target table/program is confirmed.
+     */
+    public IsSuccessResponse saveTaxPayerType(String mandatorId, String companyId, List<TaxPayerTypeRequest> requests) {
+        log.info("saveTaxPayerType called for mandatorId={}, companyId={}, count={}", mandatorId, companyId, requests.size()); //$NON-NLS-1$
+        for (TaxPayerTypeRequest request : requests) {
+            if (request.getTaxPayerCode() == null || request.getTaxPayerCode().isBlank()) {
+                throw new IllegalArgumentException("taxPayerCode is required."); //$NON-NLS-1$
+            }
+        }
+        return IsSuccessResponse.builder().isSuccess(true).build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Form build — POST /mimv/form/build
+    // -------------------------------------------------------------------------
+
+    /**
+     * Builds a MIMV form:
+     * <ol>
+     *   <li>Fetch OIB from AS400 KB0D1.HDB</li>
+     *   <li>Resolve SIFRA_OBRASCA_PP from taxPayerCode mapping</li>
+     *   <li>Delete any existing MIMV_DETALJ rows for this key (idempotency)</li>
+     *   <li>Insert MIMV_DETALJ from AS400 HF tables via linked server</li>
+     *   <li>Compute UKUP_IZNOS totals from newly inserted MIMV_DETALJ rows</li>
+     *   <li>Delete any existing MIMV_ZAGLAVLJE row for this key (idempotency)</li>
+     *   <li>Insert MIMV_ZAGLAVLJE from request body + computed totals</li>
+     * </ol>
+     */
+    public FormBuildResponse buildForm(String mandatorId, String companyId, FormBuildRequest request) {
+        log.info("buildForm: mandatorId={}, companyId={}, taxPayerCode={}, dateFrom={}, dateTo={}", //$NON-NLS-1$
+                mandatorId, companyId, request.getTaxPayerCode(), request.getDateFrom(), request.getDateTo());
+
+        // 1. Resolve OIB and form type code
+        String oib = as400Repository.fetchOib();
+        log.info("Fetched OIB from KB0D1.HDB: {}", oib != null ? "***" : "null"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+
+        String sifobr = toSifobr(request.getTaxPayerCode());
+        log.info("Resolved sifobr='{}' from taxPayerCode='{}'", sifobr, request.getTaxPayerCode()); //$NON-NLS-1$
+
+        int seqNum    = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
+        int versionNum = request.getVersionNumber() != null ? request.getVersionNumber() : 1;
+
+        int formDateInt  = request.getFormDate() != null ? Integer.parseInt(request.getFormDate().format(YYYYMMDD)) : 0;
+        String dateFrom  = request.getDateFrom() != null ? request.getDateFrom().format(YYYYMMDD) : ""; //$NON-NLS-1$
+        String dateTo    = request.getDateTo()   != null ? request.getDateTo().format(YYYYMMDD)   : ""; //$NON-NLS-1$
+
+        // 2. Delete existing detail rows (idempotency)
+        as400Repository.deleteMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
+
+        // 3. Insert MIMV_DETALJ from AS400 HF tables
+        as400Repository.insertMimvDetalj(mandatorId, oib, formDateInt, sifobr,
+                seqNum, versionNum, dateFrom, dateTo, companyId);
+
+        // 4. Compute totals from inserted detail rows
+        BigDecimal[] totals = as400Repository.sumMimvDetaljTotals(oib, formDateInt, sifobr, seqNum, versionNum);
+        BigDecimal totalNew  = totals[0];
+        BigDecimal totalUsed = totals[1];
+        log.info("Computed totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
+
+        // 5. Build composite identifier: oib-formDate-sifobr-seq-version
+        String compositeId = String.format("%s-%s-%s-%02d-%03d", //$NON-NLS-1$
+                oib != null ? oib : "", formDateInt, sifobr != null ? sifobr : "", seqNum, versionNum); //$NON-NLS-1$ //$NON-NLS-2$
+
+        // 6. Delete existing header row (idempotency)
+        as400Repository.deleteMimvZaglavlje(oib, formDateInt, sifobr, seqNum, versionNum);
+
+        // 7. Insert MIMV_ZAGLAVLJE
+        as400Repository.insertMimvZaglavlje(oib, formDateInt, sifobr, compositeId,
+                request, totalNew, totalUsed);
+
+        return FormBuildResponse.builder()
+                .id(compositeId)
+                .oibObveznika(oib)
+                .dateFrom(request.getDateFrom())
+                .dateTo(request.getDateTo())
+                .taxNewVehiclesSum(totalNew)
+                .taxUsedVehiclesSum(totalUsed)
+                .taxTotalSum(totalNew.add(totalUsed))
+                .taxPayersTypeSelected(request.getTaxPayerCode())
+                .companyDescription(request.getCompanyName())
+                .companySeat(request.getCompanySeat())
+                .taxOfficeCode(request.getTaxOfficeCode())
+                .taxOfficeDescription(request.getTaxOfficeDescription())
+                .destinationEmail(request.getDestinationEmail())
+                .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Preview existing — GET /mimv/preview/existing
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns all previously submitted MIMV forms from MIMV_ZAGLAVLJE.
+     */
+    public PreviewExistingResponse getPreviewExisting(String mandatorId, String companyId) {
+        log.info("getPreviewExisting: mandatorId={}, companyId={}", mandatorId, companyId); //$NON-NLS-1$
+        List<MimvProcessedItem> processed = as400Repository.fetchAllMimvZaglavlje();
+        log.info("Fetched {} MIMV_ZAGLAVLJE rows", processed.size()); //$NON-NLS-1$
+        return PreviewExistingResponse.builder()
+                .mimvProcessed(processed)
+                .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Brands
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns all vehicle brands from AS400.
+     */
+    public BrandsResponse getBrands(String mandatorId, String companyId) {
+        log.info("Fetching vehicle brands from AS400 for mandatorId={}", mandatorId); //$NON-NLS-1$
+        List<Brand> brands = as400Repository.fetchBrands();
+        return BrandsResponse.builder()
+                .brands(brands)
+                .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Tax offices
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns all customs/tax offices from AS400.
+     */
+    public TaxOfficesResponse getTaxOffices(String mandatorId, String companyId) {
+        log.info("Fetching tax offices from AS400 for mandatorId={}", mandatorId); //$NON-NLS-1$
+        List<TaxOffice> offices = as400Repository.fetchTaxOffices();
+        return TaxOfficesResponse.builder()
+                .taxOffices(offices)
+                .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+
+    private static String toSifobr(String taxPayerCode) {
+        if (taxPayerCode == null) {
+            return null;
+        }
+        return SIFOBR_BY_TAX_CODE.get(taxPayerCode.toUpperCase());
+    }
+}

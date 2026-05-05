@@ -1,11 +1,10 @@
 package com.smit.mimw.repository;
 
 import com.smit.mimw.dto.Brand;
-import com.smit.mimw.dto.FormBuildResponse;
-import com.smit.mimw.dto.KlcfcppRecord;
+import com.smit.mimw.dto.FormBuildRequest;
+import com.smit.mimw.dto.MimvProcessedItem;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.dto.TaxPayerType;
-import com.smit.mimw.dto.VehicleTaxItem;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,29 +19,34 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Repository for AS400 DB2 queries used by the MI-MV module.
+ * Repository for all database operations in the MI-MV module.
  *
- * When connected via SQL Server (Render deployment):
- *   Queries go through a Linked Server, exactly as Pantheon does.
- *   Table format: [linkedServer].[catalog].[library].[table]
- *   e.g.          [AS400_LS].[ADRIAVC1].[IVASXT].[KLCICPP]
+ * Primary datasource: Pantheon SQL Server (MSSQL).
+ * AS400 data is accessed via a SQL Server Linked Server.
  *
- * When connected directly to AS400 (local dev, linkedServer blank):
- *   Table format: library.table  (e.g. IVASXT.KLCICPP)
+ * MIMV_ZAGLAVLJE and MIMV_DETALJ are local Pantheon MSSQL tables.
+ * AS400 HF tables (hfs, hfk, hfb, etc.) are accessed via linked server.
  */
 @Repository
 public class As400Repository {
 
     private static final Logger log = LoggerFactory.getLogger(As400Repository.class);
 
+    private static final String MIMV_ZAGLAVLJE = "MIMV_ZAGLAVLJE"; //$NON-NLS-1$
+    private static final String MIMV_DETALJ = "MIMV_DETALJ"; //$NON-NLS-1$
+
+    private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.ofPattern("yyyyMMdd"); //$NON-NLS-1$
+
     private final JdbcTemplate jdbcTemplate;
 
-    /** Linked server name — set via env var AS400_LINKED_SERVER,
-     *  or auto-read from _cdp_param.aclinkserver at startup. */
+    /**
+     * Linked server name — set via env var AS400_LINKED_SERVER,
+     * or auto-read from _cdp_param.aclinkserver at startup.
+     */
     @Value("${as400.linked-server:}")
     private String linkedServer;
 
-    /** AS400 catalog/database name — default ADRIAVC1 */
+    /** AS400 catalog/database name — default ADRIAVC1. */
     @Value("${as400.catalog:ADRIAVC1}")
     private String catalog;
 
@@ -52,176 +56,109 @@ public class As400Repository {
 
     /**
      * If linkedServer was not provided via env var, try to read it from
-     * _cdp_param table — the same table Pantheon reads on startup.
+     * _cdp_param — the same table Pantheon reads on startup.
      */
     @PostConstruct
     public void init() {
         if (linkedServer == null || linkedServer.isBlank()) {
             try {
                 String ls = jdbcTemplate.queryForObject(
-                        "SELECT TOP 1 aclinkserver FROM _cdp_param", String.class);
+                        "SELECT TOP 1 aclinkserver FROM _cdp_param", String.class); //$NON-NLS-1$
                 if (ls != null && !ls.isBlank()) {
                     linkedServer = ls.trim();
-                    log.info("Loaded linked server name from _cdp_param: '{}'", linkedServer);
+                    log.info("Loaded linked server name from _cdp_param: '{}'", linkedServer); //$NON-NLS-1$
                 } else {
-                    log.error("_cdp_param.aclinkserver is empty. " +
-                              "AS400 is only reachable via Pantheon SQL Server linked server. " +
-                              "Set env var AS400_LINKED_SERVER or populate _cdp_param.aclinkserver.");
+                    log.error("_cdp_param.aclinkserver is empty. Set env var AS400_LINKED_SERVER or populate _cdp_param."); //$NON-NLS-1$
                 }
             } catch (Exception e) {
-                log.error("Could not read linked server from _cdp_param ({}). " +
-                          "AS400 is only reachable via Pantheon SQL Server linked server. " +
-                          "Set env var AS400_LINKED_SERVER.", e.getMessage());
+                log.error("Could not read linked server from _cdp_param ({}). Set env var AS400_LINKED_SERVER.", e.getMessage()); //$NON-NLS-1$
             }
         } else {
-            log.info("Using linked server from env var: '{}'", linkedServer);
+            log.info("Using linked server from env var: '{}'", linkedServer); //$NON-NLS-1$
         }
     }
+
+    // -------------------------------------------------------------------------
+    // AS400 table reference helper
+    // -------------------------------------------------------------------------
 
     /**
-     * Builds the fully qualified table reference.
-     *
-     * Connection is always to Pantheon SQL Server; AS400 is accessed via linked server.
-     *
-     * With linked server:    [linkedServer].[catalog].[library].[table]
-     * Without linked server: library.table  (fallback — AS400 unreachable without linked server)
+     * Builds the fully qualified four-part table name for AS400 via linked server.
+     * Format: [linkedServer].[catalog].[library].[table]
      */
-    private String table(String library, String table) {
+    private String as400Table(String library, String table) {
         if (linkedServer == null || linkedServer.isBlank()) {
-            return library + "." + table;
+            return library + "." + table; //$NON-NLS-1$
         }
-        return "[" + linkedServer + "].[" + catalog + "].[" + library + "].[" + table + "]";
+        return "[" + linkedServer + "].[" + catalog + "].[" + library + "].[" + table + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
     }
 
     // -------------------------------------------------------------------------
-    // Tax offices (carinski uredi) — library IVASXT, table KLCICPP
+    // Tax offices — AS400 IVASXT.KLCICPP
     // -------------------------------------------------------------------------
 
+    /**
+     * Fetches all tax/customs offices from AS400.
+     */
     public List<TaxOffice> fetchTaxOffices() {
-        String sql = "SELECT CIYTAA, CIL7AQ FROM " + table("IVASXT", "KLCICPP");
-        log.debug("fetchTaxOffices SQL: {}", sql);
+        String sql = "SELECT CIYTAA, CIL7AQ FROM " + as400Table("IVASXT", "KLCICPP"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        log.debug("fetchTaxOffices SQL: {}", sql); //$NON-NLS-1$
         return jdbcTemplate.query(sql, (rs, rowNum) ->
                 TaxOffice.builder()
-                        .code(rs.getString("CIYTAA") != null ? rs.getString("CIYTAA").trim() : "")
-                        .description(rs.getString("CIL7AQ") != null ? rs.getString("CIL7AQ").trim() : "")
+                        .code(trim(rs.getString("CIYTAA"))) //$NON-NLS-1$
+                        .description(trim(rs.getString("CIL7AQ"))) //$NON-NLS-1$
                         .build()
         );
     }
 
     // -------------------------------------------------------------------------
-    // Vehicle brands (šifarnik marki) — library IVASXT, table KLCHCPP
+    // Vehicle brands — AS400 IVASXT.KLCHCPP
     // -------------------------------------------------------------------------
 
+    /**
+     * Fetches all vehicle brand codes and descriptions from AS400.
+     */
     public List<Brand> fetchBrands() {
-        String sql = "SELECT CHYSAA, CHL6AQ FROM " + table("IVASXT", "KLCHCPP");
-        log.debug("fetchBrands SQL: {}", sql);
+        String sql = "SELECT CHYSAA, CHL6AQ FROM " + as400Table("IVASXT", "KLCHCPP"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        log.debug("fetchBrands SQL: {}", sql); //$NON-NLS-1$
         return jdbcTemplate.query(sql, (rs, rowNum) ->
                 Brand.builder()
-                        .code(rs.getString("CHYSAA") != null ? rs.getString("CHYSAA").trim() : "")
-                        .description(rs.getString("CHL6AQ") != null ? rs.getString("CHL6AQ").trim() : "")
+                        .code(trim(rs.getString("CHYSAA"))) //$NON-NLS-1$
+                        .description(trim(rs.getString("CHL6AQ"))) //$NON-NLS-1$
                         .build()
         );
     }
 
     // -------------------------------------------------------------------------
-    // mimv_zaglavlje — local MSSQL table (Pantheon DB), no linked server needed
+    // Taxpayer types — AS400 IVAS0000B0.IVASDET
     // -------------------------------------------------------------------------
 
     /**
-     * Fetches the first row from the local MSSQL table {@code mimv_zaglavlje}
-     * and maps it to a {@link FormBuildResponse}.
-     *
-     * @return populated FormBuildResponse or {@code null} if table is empty
+     * Fetches MIMV taxpayer type codes and descriptions from AS400 IVASDET.
+     * Codes (MV01, MV02, MV03) and their descriptions are packed in a single row.
      */
-    public FormBuildResponse fetchMimvZaglavlje() {
-        String sql = "SELECT TOP 1 " +
-                "oib_obveznika, identifikator, sifra_obrasca_pp, sifra_poduzeca, " +
-                "naziv_obveznika, sjediste_obveznika, kanali_ured_ope, " +
-                "email_adresa, odgovorna_osoba, akcija_pi, " +
-                "datum_pp, razdoblje_od, razdoblje_do, " +
-                "redni_broj_pp, redni_broj_pp_promjena, sifra_korisnika, " +
-                "uk_iznos_pp, uk_iznos_uplacenog_pp, " +
-                "iznos_dodatni1, iznos_dodatni2, " +
-                "datum_dodatni1, datum_dodatni2, " +
-                "tekst_dodatni1, tekst_dodatni2, " +
-                "status_sloga, status_sloga2 " +
-                "FROM mimv_zaglavlje";
-
-        log.debug("fetchMimvZaglavlje SQL: {}", sql);
-
-        List<FormBuildResponse> results = jdbcTemplate.query(sql, (rs, rowNum) -> {
-            String oib = trim(rs.getString("oib_obveznika"));
-
-            // razdoblje_od / razdoblje_do are numeric YYYYMMDD
-            Integer obdobljeOd = nullableInt(rs, "razdoblje_od");
-            Integer obdobljeDo = nullableInt(rs, "razdoblje_do");
-
-            LocalDate dateFrom = obdobljeOd != null ? toLocalDate(obdobljeOd) : null;
-            LocalDate dateTo = obdobljeDo != null ? toLocalDate(obdobljeDo) : null;
-
-            return FormBuildResponse.builder()
-                    .id(oib)
-                    .dateFrom(dateFrom)
-                    .dateTo(dateTo)
-                    .taxNewVehiclesSum(rs.getBigDecimal("uk_iznos_pp"))
-                    .taxUsedVehiclesSum(rs.getBigDecimal("uk_iznos_uplacenog_pp"))
-                    .taxPayersTypeSelected(trim(rs.getString("sifra_obrasca_pp")))
-                    .mandatorDescription(trim(rs.getString("sifra_poduzeca")))
-                    .companyDescription(trim(rs.getString("naziv_obveznika")))
-                    .companySeat(trim(rs.getString("sjediste_obveznika")))
-                    .taxOfficeCode(null)
-                    .taxOfficeDescription(trim(rs.getString("kanali_ured_ope")))
-                    .destinationEmail(trim(rs.getString("email_adresa")))
-                    .isUsed(false)
-                    .vehiclesToTax(List.of())
-                    .build();
-        });
-
-        if (results.isEmpty()) {
-            log.warn("mimv_zaglavlje is empty — no rows found");
-            return null;
-        }
-        return results.get(0);
-    }
-
-    /**
-     * Converts a YYYYMMDD integer to a {@link LocalDate}.
-     * Returns {@code null} if the value is 0 or invalid.
-     */
-    private static LocalDate toLocalDate(int yyyymmdd) {
-        if (yyyymmdd == 0) return null;
-        try {
-            return LocalDate.of(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Taxpayer types (tipovi obveznika) — library IVAS0000B0, table IVASDET
-    // -------------------------------------------------------------------------
-
     public List<TaxPayerType> fetchTaxPayerTypes() {
-        String sql = "SELECT TOP 1 AUHHAP, AUK5TT, AUK6TT, AUK7TT, AUK8TT FROM "
-                + table("IVAS0000B0", "IVASDET")
-                + " WHERE aupgm = 'KMDPDFR'";
-        log.debug("fetchTaxPayerTypes SQL: {}", sql);
+        String sql = "SELECT TOP 1 AUHHAP, AUK5TT, AUK6TT, AUK7TT, AUK8TT FROM " //$NON-NLS-1$
+                + as400Table("IVAS0000B0", "IVASDET") //$NON-NLS-1$ //$NON-NLS-2$
+                + " WHERE aupgm = 'KMDPDFR'"; //$NON-NLS-1$
+        log.debug("fetchTaxPayerTypes SQL: {}", sql); //$NON-NLS-1$
 
         return jdbcTemplate.query(sql, rs -> {
             List<TaxPayerType> result = new ArrayList<>();
             if (rs.next()) {
-                String auhhap = rs.getString("AUHHAP");
+                String auhhap = rs.getString("AUHHAP"); //$NON-NLS-1$
                 String[] descColumns = {
-                    rs.getString("AUK5TT"),
-                    rs.getString("AUK6TT"),
-                    rs.getString("AUK7TT"),
-                    rs.getString("AUK8TT")
+                    rs.getString("AUK5TT"), //$NON-NLS-1$
+                    rs.getString("AUK6TT"), //$NON-NLS-1$
+                    rs.getString("AUK7TT"), //$NON-NLS-1$
+                    rs.getString("AUK8TT")  //$NON-NLS-1$
                 };
-
                 if (auhhap != null && !auhhap.isBlank()) {
-                    for (String raw : auhhap.trim().split(",")) {
+                    for (String raw : auhhap.trim().split(",")) { //$NON-NLS-1$
                         String code = raw.trim();
-                        if (code.isEmpty()) continue;
+                        if (code.isEmpty()) {
+                            continue;
+                        }
                         String description = extractDescription(code, descColumns);
                         result.add(TaxPayerType.builder()
                                 .taxPayerCode(code)
@@ -236,296 +173,265 @@ public class As400Repository {
     }
 
     // -------------------------------------------------------------------------
-    // KLCFCPP — MI-MV form headers (MVMZP Zaglavlje) — library IVAS0000B0
+    // OIB — AS400 KB0D1.HDB
     // -------------------------------------------------------------------------
 
     /**
-     * Fetches rows from IVAS0000B0.KLCFCPP.
-     *
-     * @param companyCode  CFNSRO value (6-char company code, e.g. "000080"). Pass null to skip filter.
-     * @param dateFrom     filter: CFI3AG (RazdobljeOd) >= dateFrom (YYYYMMDD). Pass null to skip.
-     * @param dateTo       filter: CFI4AG (RazdobljeDo) <= dateTo (YYYYMMDD). Pass null to skip.
-     */
-    public List<KlcfcppRecord> fetchKlcfcpp(String companyCode, LocalDate dateFrom, LocalDate dateTo) {
-        StringBuilder sql = new StringBuilder(
-                "SELECT CFYQAA, CFYPAA, CFRIDX, CFNSRO, CFMSTS, CFLTAQ, CFLSAQ, CFLRAQ," +
-                " CFLQAQ, CFLPAQ, CFLOAQ, CFLNAQ, CFLMAQ, CFKRAQ, CFKQAQ," +
-                " CFIZAU, CFIYAU, CFI6AG, CFI5AG, CFI4AG, CFI3AG, CFI2AG, CFI1AG, CFI0AG," +
-                " CFFSDG, CFFRDG, CFB4SB FROM ");
-        sql.append(table("IVAS0000B0", "KLCFCPP"));
-
-        List<Object> params = new ArrayList<>();
-
-        if (companyCode != null && !companyCode.isBlank()) {
-            sql.append(" WHERE CFNSRO = ?");
-            params.add(companyCode);
-        }
-        if (dateFrom != null) {
-            sql.append(params.isEmpty() ? " WHERE" : " AND");
-            sql.append(" CFI3AG >= ?");
-            params.add(Integer.parseInt(dateFrom.format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
-        }
-        if (dateTo != null) {
-            sql.append(params.isEmpty() ? " WHERE" : " AND");
-            sql.append(" CFI4AG <= ?");
-            params.add(Integer.parseInt(dateTo.format(DateTimeFormatter.ofPattern("yyyyMMdd"))));
-        }
-
-        log.debug("fetchKlcfcpp SQL: {}", sql);
-
-        return jdbcTemplate.query(sql.toString(), (rs, rowNum) ->
-                KlcfcppRecord.builder()
-                        .sifraObrascaPP(trim(rs.getString("CFYQAA")))
-                        .oibObveznika(trim(rs.getString("CFYPAA")))
-                        .sifraKorisnika(trim(rs.getString("CFRIDX")))
-                        .sifraPoduzecea(trim(rs.getString("CFNSRO")))
-                        .statusSloga(trim(rs.getString("CFMSTS")))
-                        .carinskiUredOpis(trim(rs.getString("CFLTAQ")))
-                        .identifikator(trim(rs.getString("CFLSAQ")))
-                        .akcijaPP(trim(rs.getString("CFLRAQ")))
-                        .emailAdresa(trim(rs.getString("CFLQAQ")))
-                        .odgovornaOsoba(trim(rs.getString("CFLPAQ")))
-                        .sjedisteObveznika(trim(rs.getString("CFLOAQ")))
-                        .nazivObveznika(trim(rs.getString("CFLNAQ")))
-                        .carinskiUred(trim(rs.getString("CFLMAQ")))
-                        .tekstDodatni2(trim(rs.getString("CFKRAQ")))
-                        .tekstDodatni1(trim(rs.getString("CFKQAQ")))
-                        .iznosDodatni2(rs.getBigDecimal("CFIZAU"))
-                        .iznosDodatni1(rs.getBigDecimal("CFIYAU"))
-                        .ukIznosUplacenogPP(rs.getBigDecimal("CFI6AG"))
-                        .ukIznosPP(rs.getBigDecimal("CFI5AG"))
-                        .razdobljeDo(nullableInt(rs, "CFI4AG"))
-                        .razdobljeOd(nullableInt(rs, "CFI3AG"))
-                        .redniBrojPPPromjena(nullableInt(rs, "CFI2AG"))
-                        .redniBrojPP(nullableInt(rs, "CFI1AG"))
-                        .datumPP(nullableInt(rs, "CFI0AG"))
-                        .datumDodatni2(rs.getBigDecimal("CFFSDG"))
-                        .datumDodatni1(rs.getBigDecimal("CFFRDG"))
-                        .statusSloga2(trim(rs.getString("CFB4SB")))
-                        .build(),
-                params.toArray()
-        );
-    }
-
-    // -------------------------------------------------------------------------
-    // OIB — from KB0D1.HDB where HDBSART = 'BEN'
-    // OIB is stored at fixed position 324, length 11, inside the HDBINHALT field.
-    // -------------------------------------------------------------------------
-
-    /**
-     * Fetches the taxpayer OIB from {@code KB0D1.HDB}.
-     * <p>
-     * The {@code HDBINHALT} column is a packed fixed-width text block.
-     * OIB occupies bytes 324–334 (1-based, length 11):
-     * <pre>
-     *   name1(30) + name2(30) + street(30) + country+zip(13) + city(21)
-     *   + phone1(20) + phone2(20) + fax(20) + bank(30) + bankstreet(30)
-     *   + iban(35) + blank(16) + pp(20) + blank(8)  →  offset 324
-     * </pre>
-     *
-     * @return trimmed 11-digit OIB string, or {@code null} if not found / on error
+     * Fetches the taxpayer OIB from KB0D1.HDB.
+     * OIB occupies bytes 324-334 (length 11) inside the HDBINHALT packed field.
+     * Uses SUBSTRING (T-SQL) since the query goes through the linked server.
      */
     public String fetchOib() {
-        // OIB is at fixed offset 324, length 11 inside the HDBINHALT field.
-        // fields before OIB (each padded to fixed length):
-        // name1(30) + name2(30) + street(30) + country+zip(13) + city(21)
-        // + phone1(20) + phone2(20) + fax(20) + bank(30) + bankstreet(30)
-        // + iban(35) + blank(16) + pp(20) + blank(8)  →  offset 324, length 11
-        //
-        // NOTE: query goes through SQL Server 4-part linked-server name,
-        // so SQL Server syntax must be used: SUBSTRING (not DB2 substr).
-        String sql = "SELECT TRIM(SUBSTRING(HDBINHALT, 324, 11)) AS OIB FROM "
-                + table("KB0D1", "HDB") + " WHERE HDBSART = 'BEN'";
-        log.debug("fetchOib SQL: {}", sql);
+        String sql = "SELECT TRIM(SUBSTRING(HDBINHALT, 324, 11)) AS OIB FROM " //$NON-NLS-1$
+                + as400Table("KB0D1", "HDB") + " WHERE HDBSART = 'BEN'"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        log.debug("fetchOib SQL: {}", sql); //$NON-NLS-1$
         try {
-            List<String> results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("OIB"));
+            List<String> results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("OIB")); //$NON-NLS-1$
             if (results.isEmpty()) {
-                log.warn("No BEN record found in KB0D1.HDB");
+                log.warn("No BEN record found in KB0D1.HDB"); //$NON-NLS-1$
                 return null;
             }
             String oib = results.get(0);
             return oib != null ? oib.trim() : null;
         } catch (Exception e) {
-            log.warn("Could not fetch OIB from KB0D1.HDB: {}", e.getMessage());
+            log.warn("Could not fetch OIB from KB0D1.HDB: {}", e.getMessage()); //$NON-NLS-1$
             return null;
         }
     }
 
     // -------------------------------------------------------------------------
-    // INSERT INTO KLCGCPP — MVMZP Detalj (sql/insert_klcgcpp.sql)
+    // MIMV_ZAGLAVLJE — Pantheon MSSQL (local, no linked server)
     // -------------------------------------------------------------------------
 
     /**
-     * Executes the insert into IVAS&lt;mandatorId&gt;.KLCGCPP by loading
-     * {@code sql/insert_klcgcpp.sql} and replacing placeholders with real values.
+     * Deletes all MIMV_ZAGLAVLJE rows matching the given form primary key.
+     * Called before re-inserting to ensure idempotency.
      */
-    public void executeInsertKlcgcpp(String mandatorId, String oib, String formDate,
-                                     String formTypeCode, int seqNum, int versionNum,
-                                     String dateFrom, String dateTo, String companyId) {
-        String sql = loadAndReplacePlaceholders("sql/insert_klcgcpp.sql",
-                mandatorId, oib, formDate, formTypeCode, seqNum, versionNum, dateFrom, dateTo, companyId);
-        log.debug("executeInsertKlcgcpp SQL (first 500 chars): {}", sql.substring(0, Math.min(500, sql.length())));
+    public void deleteMimvZaglavlje(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        int rows = jdbcTemplate.update(
+                "DELETE FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                oib, formDate, sifobr, seqNum, versionNum);
+        log.info("Deleted {} existing MIMV_ZAGLAVLJE row(s) for oib=***, formDate={}, sifobr={}", rows, formDate, sifobr); //$NON-NLS-1$
+    }
+
+    /**
+     * Inserts a single MIMV_ZAGLAVLJE header row from the provided request and computed totals.
+     *
+     * @param oib           OIB_OBVEZNIKA (fetched from AS400)
+     * @param formDate      DATUM_PP as integer YYYYMMDD
+     * @param sifobr        SIFRA_OBRASCA_PP (401 or 405)
+     * @param compositeId   IDENTIFIKATOR (built from key fields)
+     * @param request       source of all remaining header fields
+     * @param totalNew      UKUP_IZNOS_NOVA — computed from MIMV_DETALJ
+     * @param totalUsed     UKUP_IZNOS_RABLJENA — computed from MIMV_DETALJ
+     */
+    public void insertMimvZaglavlje(String oib, int formDate, String sifobr, String compositeId,
+                                    FormBuildRequest request, BigDecimal totalNew, BigDecimal totalUsed) {
+        BigDecimal totalAll = totalNew.add(totalUsed);
+        String action = request.getActionCode() != null ? request.getActionCode() : "N"; //$NON-NLS-1$
+        int seqNum = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
+        int versionNum = request.getVersionNumber() != null ? request.getVersionNumber() : 1;
+        Integer obdobljeOd = request.getDateFrom() != null ? Integer.parseInt(request.getDateFrom().format(YYYYMMDD)) : null;
+        Integer obdobljeDo = request.getDateTo()   != null ? Integer.parseInt(request.getDateTo().format(YYYYMMDD))   : null;
+
+        jdbcTemplate.update(
+                "INSERT INTO " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " (OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+                + " IDENTIFIKATOR, AKCIJA_PP, RAZDOBLJE_OD, RAZDOBLJE_DO," //$NON-NLS-1$
+                + " CARINSKI_URED, CARINSKI_URED_OPIS, NAZIV_OBVEZNIKA, SJEDISTE_OBVEZNIKA," //$NON-NLS-1$
+                + " EMAIL_ADRESA, ODGOVORNA_OSOBA, TIPOVI_OBVEZNIKA," //$NON-NLS-1$
+                + " UKUP_IZNOS_NOVA, UKUP_IZNOS_RABLJENA, UKUP_IZNOS_NOVA_I_RAB)" //$NON-NLS-1$
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", //$NON-NLS-1$
+                oib, formDate, sifobr, seqNum, versionNum,
+                compositeId, action, obdobljeOd, obdobljeDo,
+                request.getTaxOfficeCode(), request.getTaxOfficeDescription(),
+                request.getCompanyName(), request.getCompanySeat(),
+                request.getDestinationEmail(), request.getResponsiblePerson(),
+                request.getTaxPayerCode(),
+                totalNew, totalUsed, totalAll);
+
+        log.info("Inserted MIMV_ZAGLAVLJE: id={}, totalNew={}, totalUsed={}", compositeId, totalNew, totalUsed); //$NON-NLS-1$
+    }
+
+    /**
+     * Fetches all MIMV_ZAGLAVLJE rows ordered by DATUM_PP descending.
+     * Used by GET /mimv/preview/existing.
+     */
+    public List<MimvProcessedItem> fetchAllMimvZaglavlje() {
+        String sql = "SELECT OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+                + " IDENTIFIKATOR, AKCIJA_PP, RAZDOBLJE_OD, RAZDOBLJE_DO," //$NON-NLS-1$
+                + " CARINSKI_URED, NAZIV_OBVEZNIKA," //$NON-NLS-1$
+                + " UKUP_IZNOS_NOVA, UKUP_IZNOS_RABLJENA, UKUP_IZNOS_NOVA_I_RAB" //$NON-NLS-1$
+                + " FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " ORDER BY DATUM_PP DESC"; //$NON-NLS-1$
+
+        log.debug("fetchAllMimvZaglavlje SQL: {}", sql); //$NON-NLS-1$
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> MimvProcessedItem.builder()
+                .oibObveznika(trim(rs.getString("OIB_OBVEZNIKA"))) //$NON-NLS-1$
+                .sifraObrascaPP(trim(rs.getString("SIFRA_OBRASCA_PP"))) //$NON-NLS-1$
+                .redniBrojPP(nullableInt(rs, "REDNI_BROJ_PP")) //$NON-NLS-1$
+                .redniBrojPPPromjena(nullableInt(rs, "REDNI_BROJ_PP_PROM")) //$NON-NLS-1$
+                .identificator(trim(rs.getString("IDENTIFIKATOR"))) //$NON-NLS-1$
+                .action(trim(rs.getString("AKCIJA_PP"))) //$NON-NLS-1$
+                .dateFrom(toLocalDate(nullableInt(rs, "RAZDOBLJE_OD"))) //$NON-NLS-1$
+                .dateTo(toLocalDate(nullableInt(rs, "RAZDOBLJE_DO"))) //$NON-NLS-1$
+                .carinskiUred(trim(rs.getString("CARINSKI_URED"))) //$NON-NLS-1$
+                .nazivObveznika(trim(rs.getString("NAZIV_OBVEZNIKA"))) //$NON-NLS-1$
+                .ukupIznosNova(rs.getBigDecimal("UKUP_IZNOS_NOVA")) //$NON-NLS-1$
+                .ukupIznosRabljena(rs.getBigDecimal("UKUP_IZNOS_RABLJENA")) //$NON-NLS-1$
+                .ukupIznosNovaIRab(rs.getBigDecimal("UKUP_IZNOS_NOVA_I_RAB")) //$NON-NLS-1$
+                .build());
+    }
+
+    // -------------------------------------------------------------------------
+    // MIMV_DETALJ — Pantheon MSSQL with data sourced from AS400 via linked server
+    // -------------------------------------------------------------------------
+
+    /**
+     * Deletes all MIMV_DETALJ rows matching the given form primary key.
+     * Called before re-inserting to ensure idempotency.
+     */
+    public void deleteMimvDetalj(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        int rows = jdbcTemplate.update(
+                "DELETE FROM " + MIMV_DETALJ //$NON-NLS-1$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                oib, formDate, sifobr, seqNum, versionNum);
+        log.info("Deleted {} existing MIMV_DETALJ row(s) for oib=***, formDate={}, sifobr={}", rows, formDate, sifobr); //$NON-NLS-1$
+    }
+
+    /**
+     * Inserts vehicle detail rows into MIMV_DETALJ by executing a DB2 SELECT
+     * on AS400 via the linked server and directing the result set into the local Pantheon table.
+     *
+     * T-SQL pattern used:
+     * <pre>
+     *   INSERT INTO MIMV_DETALJ (...) EXEC('DB2 SELECT ...') AT [linkedServer]
+     * </pre>
+     *
+     * @throws IllegalStateException if no linked server is configured
+     */
+    public void insertMimvDetalj(String mandatorId, String oib, int formDate, String sifobr,
+                                  int seqNum, int versionNum,
+                                  String dateFrom, String dateTo, String companyId) {
+        if (linkedServer == null || linkedServer.isBlank()) {
+            throw new IllegalStateException("AS400 linked server is required for MIMV_DETALJ insert. " //$NON-NLS-1$
+                    + "Configure AS400_LINKED_SERVER or _cdp_param.aclinkserver."); //$NON-NLS-1$
+        }
+
+        String db2Select = loadDetaljSelectSql(mandatorId, oib, formDate, sifobr,
+                seqNum, versionNum, dateFrom, dateTo, companyId);
+
+        String escaped = db2Select.replace("'", "''"); //$NON-NLS-1$ //$NON-NLS-2$
+
+        String sql = "INSERT INTO " + MIMV_DETALJ //$NON-NLS-1$
+                + " (OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+                + " SIFRA_VOZILA, STATUS_VOZILA, VRSTA_VOZILA, MARKA_VOZILA, TIP_VARIJANTA_TRG_NAZIV," //$NON-NLS-1$
+                + " VIN_OZNAKA, VRSTA_GORIVA, DATUM_PRVE_REGISTRACIJE, PROSJ_EMISIJA_CO2, RAZINA_EMISIJE," //$NON-NLS-1$
+                + " RADNI_OBUJAM_MOTORA, SNAGA_MOTORA, PRODAJNA_CIJENA, BROJ_PRIJEDJENIH_KM," //$NON-NLS-1$
+                + " KAMPER, PLUG_IN, VOZILO_71, VOZILO_81, TESTNO_VOZILO, DEPRECIJACIJA," //$NON-NLS-1$
+                + " POREZNI_OBVEZNIK, OIB, BROJ_RACUNA, DATUM_IZDAVANJA_RACUNA, OBRACUNATI_IZNOS_PP)" //$NON-NLS-1$
+                + " EXEC('" + escaped + "') AT [" + linkedServer + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+
+        log.debug("insertMimvDetalj SQL (first 500 chars): {}", sql.substring(0, Math.min(500, sql.length()))); //$NON-NLS-1$
         jdbcTemplate.execute(sql);
-        log.info("INSERT INTO KLCGCPP completed for mandator={}, oib={}", mandatorId, oib != null ? "***" : "null");
+        log.info("INSERT INTO MIMV_DETALJ completed for formDate={}, sifobr={}", formDate, sifobr); //$NON-NLS-1$
+    }
+
+    /**
+     * Computes the sums of OBRACUNATI_IZNOS_PP grouped by vehicle status
+     * from the just-inserted MIMV_DETALJ rows.
+     *
+     * @return BigDecimal[2] where [0]=total new vehicles, [1]=total used vehicles
+     */
+    public BigDecimal[] sumMimvDetaljTotals(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        String sql = "SELECT" //$NON-NLS-1$
+                + " SUM(CASE WHEN STATUS_VOZILA = 'N' THEN OBRACUNATI_IZNOS_PP ELSE 0 END) AS total_nova," //$NON-NLS-1$
+                + " SUM(CASE WHEN STATUS_VOZILA IN ('R', 'NT') THEN OBRACUNATI_IZNOS_PP ELSE 0 END) AS total_rabljena" //$NON-NLS-1$
+                + " FROM " + MIMV_DETALJ //$NON-NLS-1$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?"; //$NON-NLS-1$
+
+        return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
+            BigDecimal nova = rs.getBigDecimal("total_nova"); //$NON-NLS-1$
+            BigDecimal rabljena = rs.getBigDecimal("total_rabljena"); //$NON-NLS-1$
+            return new BigDecimal[]{
+                nova != null ? nova : BigDecimal.ZERO,
+                rabljena != null ? rabljena : BigDecimal.ZERO
+            };
+        }, oib, formDate, sifobr, seqNum, versionNum);
     }
 
     // -------------------------------------------------------------------------
-    // INSERT INTO KMAQCPP — MI-MV Detalj (sql/insert_kmaqcpp.sql)
+    // Private helpers
     // -------------------------------------------------------------------------
 
     /**
-     * Executes the insert into IVAS&lt;mandatorId&gt;.KMAQCPP by loading
-     * {@code sql/insert_kmaqcpp.sql} and replacing placeholders with real values.
+     * Loads insert_mimv_detalj.sql from the classpath, strips comment lines,
+     * and replaces all runtime placeholders with the provided values.
+     * Returns the plain DB2 SELECT string — no EXEC AT wrapping applied here.
      */
-    public void executeInsertKmaqcpp(String mandatorId, String oib, String formDate,
-                                     String formTypeCode, int seqNum, int versionNum,
-                                     String dateFrom, String dateTo, String companyId) {
-        String sql = loadAndReplacePlaceholders("sql/insert_kmaqcpp.sql",
-                mandatorId, oib, formDate, formTypeCode, seqNum, versionNum, dateFrom, dateTo, companyId);
-        log.debug("executeInsertKmaqcpp SQL (first 500 chars): {}", sql.substring(0, Math.min(500, sql.length())));
-        jdbcTemplate.execute(sql);
-        log.info("INSERT INTO KMAQCPP completed for mandator={}, oib={}", mandatorId, oib != null ? "***" : "null");
-    }
-
-    // -------------------------------------------------------------------------
-    // SELECT vehicles from KLCGCPP + KMAQCPP (joined on SifraVozila)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Fetches vehicle tax items by joining KLCGCPP (MVMZP Detalj) and KMAQCPP (MI-MV Detalj)
-     * on the common key columns (company, OIB, formDate, formTypeCode, seqNum, versionNum, vehicleCode).
-     */
-    public List<VehicleTaxItem> fetchVehicleTaxItems(String mandatorId, String oib, String formDate,
-                                                     String formTypeCode, int seqNum, int versionNum) {
-        String klcg = table("IVAS" + mandatorId, "KLCGCPP");
-        String kmaq = table("IVAS" + mandatorId, "KMAQCPP");
-
-        String sql = "SELECT " +
-                // KLCGCPP columns
-                "g.CGJ3AG, g.CGLUAQ, g.CGYRAA, g.CGLVAQ, g.CGLWAQ, g.CGLXAQ, g.CGLYAQ, " +
-                "g.CGI7AG, g.CGL2AQ, g.CGI8AG, g.CGL0AQ, g.CGI9AG, g.CGJAAG, g.CGJBAG, " +
-                "g.CGL1AQ, g.CGJDAG, g.CGL2AQ AS CAMPER_AQ, g.CGL3AQ, g.CGL4AQ, g.CGL5AQ, " +
-                "g.CGJEAG, g.CGJFAG, g.CGJGAG, " +
-                // KMAQCPP columns
-                "q.AQQWAQ, q.AQSBAG, q.AQSCAG, q.AQSDAG, q.AQSEAG, " +
-                "q.AQQXAQ, q.AQQYAQ, q.AQSFAG, q.AQSGAG, q.AQSHAG " +
-                "FROM " + klcg + " g " +
-                "LEFT JOIN " + kmaq + " q ON " +
-                "  g.CGNSRO = q.AQNSRO AND g.CGYPAA = q.AQYPAA AND g.CGI0AG = q.AQI0AG " +
-                "  AND g.CGYQAA = q.AQYQAA AND g.CGI1AG = q.AQI1AG AND g.CGI2AG = q.AQI2AG " +
-                "  AND g.CGJ3AG = q.AQJ3AG " +
-                "WHERE g.CGYPAA = ? AND g.CGI0AG = ? AND g.CGYQAA = ? AND g.CGI1AG = ? AND g.CGI2AG = ?";
-
-        log.debug("fetchVehicleTaxItems SQL: {}", sql);
-
-        return jdbcTemplate.query(sql,
-                new Object[]{oib, Integer.parseInt(formDate), formTypeCode, seqNum, versionNum},
-                (rs, rowNum) -> VehicleTaxItem.builder()
-                        // KLCGCPP fields
-                        .vehicleCode(nullableInt(rs, "CGJ3AG"))
-                        .vehicleType(trim(rs.getString("CGLUAQ")))
-                        .brandCode(trim(rs.getString("CGYRAA")))
-                        .brandDescription(trim(rs.getString("CGLVAQ")))
-                        .commercialDescription(trim(rs.getString("CGLWAQ")))
-                        .vin(trim(rs.getString("CGLXAQ")))
-                        .fuelType(trim(rs.getString("CGLYAQ")))
-                        .co2Emission(rs.getBigDecimal("CGI7AG"))
-                        .emissionLevel(trim(rs.getString("CGL2AQ")))
-                        .engineDisplacement(nullableInt(rs, "CGI8AG"))
-                        .complianceCertificateNumber(trim(rs.getString("CGL0AQ")))
-                        .taxBase(rs.getBigDecimal("CGI9AG"))
-                        .taxRate(rs.getBigDecimal("CGJAAG"))
-                        .specialTaxAmount(rs.getBigDecimal("CGJBAG"))
-                        .exemption(trim(rs.getString("CGL1AQ")))
-                        .plugIn(rs.getBigDecimal("CGJDAG"))
-                        .camper(trim(rs.getString("CAMPER_AQ")))
-                        .taxPayer(trim(rs.getString("CGL3AQ")))
-                        .taxPayerOib(trim(rs.getString("CGL4AQ")))
-                        .invoiceNumber(trim(rs.getString("CGL5AQ")))
-                        .invoiceDate(nullableInt(rs, "CGJEAG"))
-                        .paidTaxAmount(rs.getBigDecimal("CGJFAG"))
-                        .paymentDate(nullableInt(rs, "CGJGAG"))
-                        // KMAQCPP fields
-                        .status(trim(rs.getString("AQQWAQ")))
-                        .dateFirstRegistration(parseYyyymmddDate(rs, "AQSBAG"))
-                        .enginePower(rs.getBigDecimal("AQSCAG"))
-                        .sellingPrice(rs.getBigDecimal("AQSDAG"))
-                        .mileage(rs.getBigDecimal("AQSEAG"))
-                        .vehicle71(trim(rs.getString("AQQXAQ")))
-                        .vehicle81(trim(rs.getString("AQQYAQ")))
-                        .testVehicle(rs.getBigDecimal("AQSFAG"))
-                        .depreciation(rs.getBigDecimal("AQSGAG"))
-                        .calculatedTaxAmount(rs.getBigDecimal("AQSHAG"))
-                        .build()
-        );
-    }
-
-    // -------------------------------------------------------------------------
-    // Helper: load SQL from classpath resource and replace placeholders
-    // -------------------------------------------------------------------------
-
-    /**
-     * Loads a SQL file from the classpath, strips comment lines, replaces
-     * the 9 standard placeholders with the provided values, and — when a
-     * SQL Server linked server is configured — wraps the result in a
-     * pass-through {@code EXEC('...') AT [linkedServer]} call so that
-     * SQL Server does NOT parse the DB2-native syntax
-     * ({@code ifnull}, {@code isnumericdec}, {@code datefmt},
-     * {@code sysibm.sysdummy1}, etc.).
-     */
-    private String loadAndReplacePlaceholders(String resourcePath,
-                                              String mandatorId, String oib, String formDate,
-                                              String formTypeCode, int seqNum, int versionNum,
-                                              String dateFrom, String dateTo, String companyId) {
+    private String loadDetaljSelectSql(String mandatorId, String oib, int formDate, String sifobr,
+                                        int seqNum, int versionNum,
+                                        String dateFrom, String dateTo, String companyId) {
         try {
-            String raw = new String(
-                    getClass().getClassLoader().getResourceAsStream(resourcePath).readAllBytes(),
-                    java.nio.charset.StandardCharsets.UTF_8);
+            byte[] bytes = getClass().getClassLoader()
+                    .getResourceAsStream("sql/insert_mimv_detalj.sql").readAllBytes(); //$NON-NLS-1$
+            String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
 
-            // Strip SQL comment lines (lines starting with --)
             StringBuilder sb = new StringBuilder();
-            for (String line : raw.split("\n")) {
-                if (!line.trim().startsWith("--")) {
-                    sb.append(line).append("\n");
+            for (String line : raw.split("\n")) { //$NON-NLS-1$
+                if (!line.trim().startsWith("--")) { //$NON-NLS-1$
+                    sb.append(line).append("\n"); //$NON-NLS-1$
                 }
             }
             String sql = sb.toString();
 
-            sql = sql.replace("<SIFPOD>",   mandatorId != null ? mandatorId : "");
-            sql = sql.replace("<OIB>",      oib != null ? oib : "");
-            sql = sql.replace("<DATUM>",    formDate);
-            sql = sql.replace("<SIFOBR>",   formTypeCode != null ? formTypeCode : "");
-            sql = sql.replace("<RBR>",      String.valueOf(seqNum));
-            sql = sql.replace("<RBRPROM>",  String.valueOf(versionNum));
-            sql = sql.replace("<ODDATUMA>", dateFrom);
-            sql = sql.replace("<DODATUMA>", dateTo);
-            sql = sql.replace("<BRANCH>",   companyId != null ? companyId : "");
+            sql = sql.replace("<SIFPOD>",   mandatorId != null ? mandatorId : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<OIB>",      oib != null ? oib : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<DATUM>",    String.valueOf(formDate)); //$NON-NLS-1$
+            sql = sql.replace("<SIFOBR>",   sifobr != null ? sifobr : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<RBR>",      String.valueOf(seqNum)); //$NON-NLS-1$
+            sql = sql.replace("<RBRPROM>",  String.valueOf(versionNum)); //$NON-NLS-1$
+            sql = sql.replace("<ODDATUMA>", dateFrom != null ? dateFrom : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<DODATUMA>", dateTo != null ? dateTo : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<BRANCH>",   companyId != null ? companyId : ""); //$NON-NLS-1$ //$NON-NLS-2$
 
-            sql = sql.trim();
-
-            if (linkedServer != null && !linkedServer.isBlank()) {
-                // ----------------------------------------------------------------
-                // SQL Server linked-server path:
-                // The INSERT SQL is DB2-native and contains functions that SQL
-                // Server does not recognise (ifnull, isnumericdec, datefmt, …).
-                // Wrapping with EXEC('…') AT [linkedServer] sends the string
-                // directly to AS400 for execution, bypassing SQL Server's parser.
-                //
-                // Single quotes inside the SQL must be doubled so the outer
-                // EXEC string literal is valid T-SQL.
-                // ----------------------------------------------------------------
-                String escaped = sql.replace("'", "''");
-                String passThrough = "EXEC('" + escaped + "') AT [" + linkedServer + "]";
-                log.debug("Using pass-through EXEC ... AT [{}] for {}", linkedServer, resourcePath);
-                return passThrough;
-            }
-
-            // Direct AS400/DB2 JDBC path — send DB2-native SQL as-is.
-            return sql;
-
+            return sql.trim();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to load SQL resource: " + resourcePath, e);
+            throw new RuntimeException("Failed to load sql/insert_mimv_detalj.sql", e); //$NON-NLS-1$
         }
+    }
+
+    /**
+     * Extracts the human-readable description for the given taxpayer type code
+     * from the packed AUKxTT columns returned by IVASDET.
+     */
+    private String extractDescription(String code, String[] fields) {
+        for (String raw : fields) {
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            String text = raw.trim();
+            if (text.startsWith(code)) {
+                int dash = text.indexOf(" - "); //$NON-NLS-1$
+                if (dash >= 0) {
+                    return text.substring(dash + 3).trim();
+                }
+            }
+            int colonSpace = text.indexOf(": "); //$NON-NLS-1$
+            if (colonSpace >= 0) {
+                text = text.substring(colonSpace + 2).trim();
+            }
+            if (text.startsWith(code)) {
+                int dash = text.indexOf(" - "); //$NON-NLS-1$
+                if (dash >= 0) {
+                    return text.substring(dash + 3).trim();
+                }
+            }
+        }
+        log.warn("No description found for taxpayer code '{}' in IVASDET AUKxTT columns", code); //$NON-NLS-1$
+        return code;
     }
 
     private static String trim(String s) {
@@ -538,33 +444,16 @@ public class As400Repository {
     }
 
     /**
-     * Reads an integer column stored as YYYYMMDD and converts it to a {@link LocalDate}.
-     * Returns {@code null} if the column is null or the value is 0.
+     * Converts a YYYYMMDD integer to a LocalDate. Returns null for 0 or invalid values.
      */
-    private static LocalDate parseYyyymmddDate(java.sql.ResultSet rs, String col) throws java.sql.SQLException {
-        int v = rs.getInt(col);
-        if (rs.wasNull() || v == 0) return null;
+    private static LocalDate toLocalDate(Integer yyyymmdd) {
+        if (yyyymmdd == null || yyyymmdd == 0) {
+            return null;
+        }
         try {
-            return LocalDate.of(v / 10000, (v / 100) % 100, v % 100);
+            return LocalDate.of(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100);
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private String extractDescription(String code, String[] fields) {
-        for (String raw : fields) {
-            if (raw == null || raw.isBlank()) continue;
-            String text = raw.trim();
-            if (!text.startsWith(code)) {
-                int colonSpace = text.indexOf(": ");
-                if (colonSpace >= 0) text = text.substring(colonSpace + 2).trim();
-            }
-            if (text.startsWith(code)) {
-                int dash = text.indexOf(" - ");
-                if (dash >= 0) return text.substring(dash + 3).trim();
-            }
-        }
-        log.warn("No description found for taxpayer code '{}' in ivasdet AUKxTT columns", code);
-        return code;
     }
 }
