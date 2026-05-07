@@ -144,9 +144,12 @@ public class MimvFormService {
                 request, companyData.getCompanyDescription(), companyData.getCompanySeat(),
                 totalNew, totalUsed);
 
-        // 8. Fetch the just-inserted detail rows for the response
+        // 8. Fetch the just-inserted detail rows and selected taxpayer types for the response
         List<MimvDetaljItem> detalji = as400Repository.fetchMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
         log.info("Fetched {} MIMV_DETALJ rows for response", detalji.size()); //$NON-NLS-1$
+
+        List<String> selectedTypes = as400Repository.fetchOdabraniTipoviObveznika(oib);
+        log.info("Fetched {} selected taxpayer types for oib=***", selectedTypes.size()); //$NON-NLS-1$
 
         MimvZaglavljeItem zaglavlje = MimvZaglavljeItem.builder()
                 .id(compositeId)
@@ -168,6 +171,7 @@ public class MimvFormService {
                 .taxNewVehiclesSum(totalNew)
                 .taxUsedVehiclesSum(totalUsed)
                 .taxTotalSum(totalNew.add(totalUsed))
+                .selectedTaxPayerTypes(selectedTypes)
                 .build();
 
         return FormBuildResponse.builder()

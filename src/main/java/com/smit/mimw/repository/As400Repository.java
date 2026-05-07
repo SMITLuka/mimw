@@ -241,6 +241,35 @@ public class As400Repository {
     }
 
     // -------------------------------------------------------------------------
+    // MIMV_ODABRANI_TIPOVI_OBVEZNIKA — Pantheon MSSQL (local, no linked server)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns the list of active taxpayer type codes (MV01, MV02, MV03) for the given OIB.
+     * Queries MIMV_ODABRANI_TIPOVI_OBVEZNIKA and collects codes whose BIT flag is 1.
+     * Returns an empty list if the row does not exist or the query fails.
+     */
+    public List<String> fetchOdabraniTipoviObveznika(String oib) {
+        String sql = "SELECT [MV01_PROIZVOĐAČ] AS mv01, MV02_TRGOVAC_NOVIM AS mv02, MV03_TRGOVAC_RABLJENIM AS mv03" //$NON-NLS-1$
+                + " FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE OIB_OBVEZNIKA = ?"; //$NON-NLS-1$
+        log.debug("fetchOdabraniTipoviObveznika SQL: {}", sql); //$NON-NLS-1$
+        try {
+            return jdbcTemplate.query(sql, (rs) -> {
+                List<String> types = new ArrayList<>();
+                if (rs.next()) {
+                    if (rs.getBoolean("mv01")) types.add("MV01"); //$NON-NLS-1$ //$NON-NLS-2$
+                    if (rs.getBoolean("mv02")) types.add("MV02"); //$NON-NLS-1$ //$NON-NLS-2$
+                    if (rs.getBoolean("mv03")) types.add("MV03"); //$NON-NLS-1$ //$NON-NLS-2$
+                }
+                return types;
+            }, oib);
+        } catch (Exception e) {
+            log.warn("Could not fetch MIMV_ODABRANI_TIPOVI_OBVEZNIKA for oib=***: {}", e.getMessage()); //$NON-NLS-1$
+            return new ArrayList<>();
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // MIMV_ZAGLAVLJE — Pantheon MSSQL (local, no linked server)
     // -------------------------------------------------------------------------
 

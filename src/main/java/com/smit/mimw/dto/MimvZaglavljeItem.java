@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * Represents a single MIMV_ZAGLAVLJE header row.
@@ -76,4 +77,7 @@ public class MimvZaglavljeItem {
 
     /** UKUP_IZNOS_NOVA_I_RAB */
     private BigDecimal taxTotalSum;
+
+    /** Active taxpayer type codes from MIMV_ODABRANI_TIPOVI_OBVEZNIKA (MV01, MV02, MV03) */
+    private List<String> selectedTaxPayerTypes;
 }
