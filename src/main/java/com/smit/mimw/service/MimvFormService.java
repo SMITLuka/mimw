@@ -1,11 +1,14 @@
 package com.smit.mimw.service;
 
-import com.smit.mimw.dto.BrandsResponse;
 import com.smit.mimw.dto.Brand;
+import com.smit.mimw.dto.BrandsResponse;
+import com.smit.mimw.dto.CompanyData;
 import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.FormBuildResponse;
 import com.smit.mimw.dto.IsSuccessResponse;
+import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
+import com.smit.mimw.dto.MimvZaglavljeItem;
 import com.smit.mimw.dto.PreviewExistingResponse;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.dto.TaxOfficesResponse;
@@ -98,19 +101,22 @@ public class MimvFormService {
         log.info("buildForm: mandatorId={}, companyId={}, taxPayerCode={}, dateFrom={}, dateTo={}", //$NON-NLS-1$
                 mandatorId, companyId, request.getTaxPayerCode(), request.getDateFrom(), request.getDateTo());
 
-        // 1. Resolve OIB and form type code
+        // 1. Resolve OIB, company data, and form type code
         String oib = as400Repository.fetchOib();
         log.info("Fetched OIB from KB0D1.HDB: {}", oib != null ? "***" : "null"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+
+        CompanyData companyData = as400Repository.fetchCompanyData();
+        log.info("Fetched company data from KB0D1.ZBEN1"); //$NON-NLS-1$
 
         String sifobr = toSifobr(request.getTaxPayerCode());
         log.info("Resolved sifobr='{}' from taxPayerCode='{}'", sifobr, request.getTaxPayerCode()); //$NON-NLS-1$
 
-        int seqNum    = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
+        int seqNum     = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
         int versionNum = request.getVersionNumber() != null ? request.getVersionNumber() : 1;
 
-        int formDateInt  = request.getFormDate() != null ? Integer.parseInt(request.getFormDate().format(YYYYMMDD)) : 0;
-        String dateFrom  = request.getDateFrom() != null ? request.getDateFrom().format(YYYYMMDD) : ""; //$NON-NLS-1$
-        String dateTo    = request.getDateTo()   != null ? request.getDateTo().format(YYYYMMDD)   : ""; //$NON-NLS-1$
+        int formDateInt = request.getFormDate() != null ? Integer.parseInt(request.getFormDate().format(YYYYMMDD)) : 0;
+        String dateFrom = request.getDateFrom() != null ? request.getDateFrom().format(YYYYMMDD) : ""; //$NON-NLS-1$
+        String dateTo   = request.getDateTo()   != null ? request.getDateTo().format(YYYYMMDD)   : ""; //$NON-NLS-1$
 
         // 2. Delete existing detail rows (idempotency)
         as400Repository.deleteMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
@@ -132,24 +138,41 @@ public class MimvFormService {
         // 6. Delete existing header row (idempotency)
         as400Repository.deleteMimvZaglavlje(oib, formDateInt, sifobr, seqNum, versionNum);
 
-        // 7. Insert MIMV_ZAGLAVLJE
+        // 7. Insert MIMV_ZAGLAVLJE with fetched company data
+        String actionCode = request.getActionCode() != null ? request.getActionCode() : "N"; //$NON-NLS-1$
         as400Repository.insertMimvZaglavlje(oib, formDateInt, sifobr, compositeId,
-                request, totalNew, totalUsed);
+                request, companyData.getCompanyDescription(), companyData.getCompanySeat(),
+                totalNew, totalUsed);
 
-        return FormBuildResponse.builder()
+        // 8. Fetch the just-inserted detail rows for the response
+        List<MimvDetaljItem> detalji = as400Repository.fetchMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
+        log.info("Fetched {} MIMV_DETALJ rows for response", detalji.size()); //$NON-NLS-1$
+
+        MimvZaglavljeItem zaglavlje = MimvZaglavljeItem.builder()
                 .id(compositeId)
                 .oibObveznika(oib)
+                .datumPP(formDateInt)
+                .sifraObrascaPP(sifobr)
+                .redniBrojPP(seqNum)
+                .redniBrojPPProm(versionNum)
+                .actionCode(actionCode)
                 .dateFrom(request.getDateFrom())
                 .dateTo(request.getDateTo())
+                .taxOfficeCode(request.getTaxOfficeCode())
+                .taxOfficeDescription(request.getTaxOfficeDescription())
+                .companyDescription(companyData.getCompanyDescription())
+                .companySeat(companyData.getCompanySeat())
+                .destinationEmail(request.getDestinationEmail())
+                .responsiblePerson(request.getResponsiblePerson())
+                .taxPayerCode(request.getTaxPayerCode())
                 .taxNewVehiclesSum(totalNew)
                 .taxUsedVehiclesSum(totalUsed)
                 .taxTotalSum(totalNew.add(totalUsed))
-                .taxPayersTypeSelected(request.getTaxPayerCode())
-                .companyDescription(request.getCompanyName())
-                .companySeat(request.getCompanySeat())
-                .taxOfficeCode(request.getTaxOfficeCode())
-                .taxOfficeDescription(request.getTaxOfficeDescription())
-                .destinationEmail(request.getDestinationEmail())
+                .build();
+
+        return FormBuildResponse.builder()
+                .zaglavlje(zaglavlje)
+                .detalji(detalji)
                 .build();
     }
 

@@ -1,7 +1,9 @@
 package com.smit.mimw.repository;
 
 import com.smit.mimw.dto.Brand;
+import com.smit.mimw.dto.CompanyData;
 import com.smit.mimw.dto.FormBuildRequest;
+import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.dto.TaxPayerType;
@@ -17,6 +19,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Repository for all database operations in the MI-MV module.
@@ -200,6 +204,43 @@ public class As400Repository {
     }
 
     // -------------------------------------------------------------------------
+    // Company data — AS400 KB0D1.ZBEN1
+    // -------------------------------------------------------------------------
+
+    /**
+     * Fetches company name and address from KB0D1.ZBEN1.
+     * Returns empty strings on failure rather than propagating the exception,
+     * so the form-build flow is not blocked when the table is temporarily unavailable.
+     */
+    public CompanyData fetchCompanyData() {
+        String sql = "SELECT TOP 1 BENNAME1, BENNAME2, BENSTR, BENPLZ, BENORT FROM " //$NON-NLS-1$
+                + as400Table("KB0D1", "ZBEN1"); //$NON-NLS-1$ //$NON-NLS-2$
+        log.debug("fetchCompanyData SQL: {}", sql); //$NON-NLS-1$
+        try {
+            return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
+                String name1 = trim(rs.getString("BENNAME1")); //$NON-NLS-1$
+                String name2 = trim(rs.getString("BENNAME2")); //$NON-NLS-1$
+                String str   = trim(rs.getString("BENSTR")); //$NON-NLS-1$
+                String plz   = trim(rs.getString("BENPLZ")); //$NON-NLS-1$
+                String ort   = trim(rs.getString("BENORT")); //$NON-NLS-1$
+                String description = Stream.of(name1, name2)
+                        .filter(s -> s != null && !s.isBlank())
+                        .collect(Collectors.joining(" ")); //$NON-NLS-1$
+                String seat = Stream.of(str, plz, ort)
+                        .filter(s -> s != null && !s.isBlank())
+                        .collect(Collectors.joining(" ")); //$NON-NLS-1$
+                return CompanyData.builder()
+                        .companyDescription(description)
+                        .companySeat(seat)
+                        .build();
+            });
+        } catch (Exception e) {
+            log.warn("Could not fetch company data from KB0D1.ZBEN1: {}", e.getMessage()); //$NON-NLS-1$
+            return CompanyData.builder().companyDescription("").companySeat("").build(); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // MIMV_ZAGLAVLJE — Pantheon MSSQL (local, no linked server)
     // -------------------------------------------------------------------------
 
@@ -227,7 +268,8 @@ public class As400Repository {
      * @param totalUsed     UKUP_IZNOS_RABLJENA — computed from MIMV_DETALJ
      */
     public void insertMimvZaglavlje(String oib, int formDate, String sifobr, String compositeId,
-                                    FormBuildRequest request, BigDecimal totalNew, BigDecimal totalUsed) {
+                                    FormBuildRequest request, String companyDescription, String companySeat,
+                                    BigDecimal totalNew, BigDecimal totalUsed) {
         BigDecimal totalAll = totalNew.add(totalUsed);
         String action = request.getActionCode() != null ? request.getActionCode() : "N"; //$NON-NLS-1$
         int seqNum = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
@@ -246,7 +288,7 @@ public class As400Repository {
                 oib, formDate, sifobr, seqNum, versionNum,
                 compositeId, action, obdobljeOd, obdobljeDo,
                 request.getTaxOfficeCode(), request.getTaxOfficeDescription(),
-                request.getCompanyName(), request.getCompanySeat(),
+                companyDescription, companySeat,
                 request.getDestinationEmail(), request.getResponsiblePerson(),
                 request.getTaxPayerCode(),
                 totalNew, totalUsed, totalAll);
@@ -360,6 +402,58 @@ public class As400Repository {
                 rabljena != null ? rabljena : BigDecimal.ZERO
             };
         }, oib, formDate, sifobr, seqNum, versionNum);
+    }
+
+    /**
+     * Fetches all MIMV_DETALJ rows for the given form primary key.
+     * Called after insertMimvDetalj to include detail rows in the build-form response.
+     */
+    public List<MimvDetaljItem> fetchMimvDetalj(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        String sql = "SELECT OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+                + " SIFRA_VOZILA, STATUS_VOZILA, VRSTA_VOZILA, MARKA_VOZILA, TIP_VARIJANTA_TRG_NAZIV," //$NON-NLS-1$
+                + " VIN_OZNAKA, VRSTA_GORIVA, DATUM_PRVE_REGISTRACIJE, PROSJ_EMISIJA_CO2, RAZINA_EMISIJE," //$NON-NLS-1$
+                + " RADNI_OBUJAM_MOTORA, SNAGA_MOTORA, PRODAJNA_CIJENA, BROJ_PRIJEDJENIH_KM," //$NON-NLS-1$
+                + " KAMPER, PLUG_IN, VOZILO_71, VOZILO_81, TESTNO_VOZILO, DEPRECIJACIJA," //$NON-NLS-1$
+                + " POREZNI_OBVEZNIK, OIB, BROJ_RACUNA, DATUM_IZDAVANJA_RACUNA, OBRACUNATI_IZNOS_PP" //$NON-NLS-1$
+                + " FROM " + MIMV_DETALJ //$NON-NLS-1$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?" //$NON-NLS-1$
+                + " ORDER BY DATUM_IZDAVANJA_RACUNA"; //$NON-NLS-1$
+
+        log.debug("fetchMimvDetalj SQL: {}", sql); //$NON-NLS-1$
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> MimvDetaljItem.builder()
+                .oibObveznika(trim(rs.getString("OIB_OBVEZNIKA"))) //$NON-NLS-1$
+                .datumPP(nullableInt(rs, "DATUM_PP")) //$NON-NLS-1$
+                .sifraObrascaPP(trim(rs.getString("SIFRA_OBRASCA_PP"))) //$NON-NLS-1$
+                .redniBrojPP(nullableInt(rs, "REDNI_BROJ_PP")) //$NON-NLS-1$
+                .redniBrojPPProm(nullableInt(rs, "REDNI_BROJ_PP_PROM")) //$NON-NLS-1$
+                .sifraVozila(trim(rs.getString("SIFRA_VOZILA"))) //$NON-NLS-1$
+                .statusVozila(trim(rs.getString("STATUS_VOZILA"))) //$NON-NLS-1$
+                .vrstaVozila(trim(rs.getString("VRSTA_VOZILA"))) //$NON-NLS-1$
+                .markaVozila(trim(rs.getString("MARKA_VOZILA"))) //$NON-NLS-1$
+                .tipVarijantaTrgNaziv(trim(rs.getString("TIP_VARIJANTA_TRG_NAZIV"))) //$NON-NLS-1$
+                .vinOznaka(trim(rs.getString("VIN_OZNAKA"))) //$NON-NLS-1$
+                .vrstaGoriva(trim(rs.getString("VRSTA_GORIVA"))) //$NON-NLS-1$
+                .datumPrveRegistracije(nullableInt(rs, "DATUM_PRVE_REGISTRACIJE")) //$NON-NLS-1$
+                .prosjEmisijaCO2(rs.getBigDecimal("PROSJ_EMISIJA_CO2")) //$NON-NLS-1$
+                .razinaEmisije(trim(rs.getString("RAZINA_EMISIJE"))) //$NON-NLS-1$
+                .radniObujamMotora(rs.getBigDecimal("RADNI_OBUJAM_MOTORA")) //$NON-NLS-1$
+                .snagaMotora(rs.getBigDecimal("SNAGA_MOTORA")) //$NON-NLS-1$
+                .prodajnaCijena(rs.getBigDecimal("PRODAJNA_CIJENA")) //$NON-NLS-1$
+                .brojPrijedjenihKm(rs.getBigDecimal("BROJ_PRIJEDJENIH_KM")) //$NON-NLS-1$
+                .kamper(trim(rs.getString("KAMPER"))) //$NON-NLS-1$
+                .plugIn(nullableInt(rs, "PLUG_IN")) //$NON-NLS-1$
+                .vozilo71(trim(rs.getString("VOZILO_71"))) //$NON-NLS-1$
+                .vozilo81(trim(rs.getString("VOZILO_81"))) //$NON-NLS-1$
+                .testnoVozilo(rs.getBigDecimal("TESTNO_VOZILO")) //$NON-NLS-1$
+                .deprecijacija(rs.getBigDecimal("DEPRECIJACIJA")) //$NON-NLS-1$
+                .porezniObveznik(trim(rs.getString("POREZNI_OBVEZNIK"))) //$NON-NLS-1$
+                .oib(trim(rs.getString("OIB"))) //$NON-NLS-1$
+                .brojRacuna(trim(rs.getString("BROJ_RACUNA"))) //$NON-NLS-1$
+                .datumIzdavanjaRacuna(nullableInt(rs, "DATUM_IZDAVANJA_RACUNA")) //$NON-NLS-1$
+                .obracunatiIznosPP(rs.getBigDecimal("OBRACUNATI_IZNOS_PP")) //$NON-NLS-1$
+                .build(),
+                oib, formDate, sifobr, seqNum, versionNum);
     }
 
     // -------------------------------------------------------------------------

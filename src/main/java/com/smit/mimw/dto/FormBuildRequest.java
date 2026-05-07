@@ -48,12 +48,6 @@ public class FormBuildRequest {
     /** AKCIJA_PP — action code: N=new, A=amendment */
     private String actionCode; //$NON-NLS-1$
 
-    /** NAZIV_OBVEZNIKA — company name */
-    private String companyName; //$NON-NLS-1$
-
-    /** SJEDISTE_OBVEZNIKA — company registered seat */
-    private String companySeat; //$NON-NLS-1$
-
     /** ODGOVORNA_OSOBA — responsible person name */
     private String responsiblePerson; //$NON-NLS-1$
 }
