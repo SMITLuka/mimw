@@ -6,7 +6,6 @@ import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
 import com.smit.mimw.dto.TaxOffice;
-import com.smit.mimw.dto.TaxPayerType;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -131,49 +130,6 @@ public class As400Repository {
                         .description(trim(rs.getString("CHL6AQ"))) //$NON-NLS-1$
                         .build()
         );
-    }
-
-    // -------------------------------------------------------------------------
-    // Taxpayer types — AS400 IVAS0000B0.IVASDET
-    // -------------------------------------------------------------------------
-
-    /**
-     * Fetches MIMV taxpayer type codes and descriptions from AS400 IVASDET.
-     * Codes (MV01, MV02, MV03) and their descriptions are packed in a single row.
-     */
-    public List<TaxPayerType> fetchTaxPayerTypes() {
-        String sql = "SELECT TOP 1 AUHHAP, AUK5TT, AUK6TT, AUK7TT, AUK8TT FROM " //$NON-NLS-1$
-                + as400Table("IVAS0000B0", "IVASDET") //$NON-NLS-1$ //$NON-NLS-2$
-                + " WHERE aupgm = 'KMDPDFR'"; //$NON-NLS-1$
-        log.debug("fetchTaxPayerTypes SQL: {}", sql); //$NON-NLS-1$
-
-        return jdbcTemplate.query(sql, rs -> {
-            List<TaxPayerType> result = new ArrayList<>();
-            if (rs.next()) {
-                String auhhap = rs.getString("AUHHAP"); //$NON-NLS-1$
-                String[] descColumns = {
-                    rs.getString("AUK5TT"), //$NON-NLS-1$
-                    rs.getString("AUK6TT"), //$NON-NLS-1$
-                    rs.getString("AUK7TT"), //$NON-NLS-1$
-                    rs.getString("AUK8TT")  //$NON-NLS-1$
-                };
-                if (auhhap != null && !auhhap.isBlank()) {
-                    for (String raw : auhhap.trim().split(",")) { //$NON-NLS-1$
-                        String code = raw.trim();
-                        if (code.isEmpty()) {
-                            continue;
-                        }
-                        String description = extractDescription(code, descColumns);
-                        result.add(TaxPayerType.builder()
-                                .taxPayerCode(code)
-                                .taxPayerDescription(description)
-                                .selected(false)
-                                .build());
-                    }
-                }
-            }
-            return result;
-        });
     }
 
     // -------------------------------------------------------------------------
@@ -524,37 +480,6 @@ public class As400Repository {
         } catch (Exception e) {
             throw new RuntimeException("Failed to load sql/insert_mimv_detalj.sql", e); //$NON-NLS-1$
         }
-    }
-
-    /**
-     * Extracts the human-readable description for the given taxpayer type code
-     * from the packed AUKxTT columns returned by IVASDET.
-     */
-    private String extractDescription(String code, String[] fields) {
-        for (String raw : fields) {
-            if (raw == null || raw.isBlank()) {
-                continue;
-            }
-            String text = raw.trim();
-            if (text.startsWith(code)) {
-                int dash = text.indexOf(" - "); //$NON-NLS-1$
-                if (dash >= 0) {
-                    return text.substring(dash + 3).trim();
-                }
-            }
-            int colonSpace = text.indexOf(": "); //$NON-NLS-1$
-            if (colonSpace >= 0) {
-                text = text.substring(colonSpace + 2).trim();
-            }
-            if (text.startsWith(code)) {
-                int dash = text.indexOf(" - "); //$NON-NLS-1$
-                if (dash >= 0) {
-                    return text.substring(dash + 3).trim();
-                }
-            }
-        }
-        log.warn("No description found for taxpayer code '{}' in IVASDET AUKxTT columns", code); //$NON-NLS-1$
-        return code;
     }
 
     private static String trim(String s) {

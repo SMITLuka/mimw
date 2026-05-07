@@ -57,11 +57,18 @@ public class MimvFormService {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns all MIMV taxpayer types from AS400.
+     * Returns all MIMV taxpayer types from MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
+     * Descriptions are fixed per type code; selected flag reflects the BIT value in the table.
      */
     public TaxPayerTypesResponse getTaxPayerTypes(String mandatorId, String companyId) {
-        log.info("Fetching taxpayer types from AS400 for mandatorId={}, companyId={}", mandatorId, companyId); //$NON-NLS-1$
-        List<TaxPayerType> types = as400Repository.fetchTaxPayerTypes();
+        log.info("Fetching taxpayer types for mandatorId={}, companyId={}", mandatorId, companyId); //$NON-NLS-1$
+        String oib = as400Repository.fetchOib();
+        List<String> selectedCodes = as400Repository.fetchOdabraniTipoviObveznika(oib);
+        List<TaxPayerType> types = List.of(
+                TaxPayerType.builder().taxPayerCode("MV01").taxPayerDescription("PROIZVOĐAČ MOTORNIH VOZILA").selected(selectedCodes.contains("MV01")).build(), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                TaxPayerType.builder().taxPayerCode("MV02").taxPayerDescription("TRGOVAC NOVIM MOT.VOZILIMA").selected(selectedCodes.contains("MV02")).build(), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                TaxPayerType.builder().taxPayerCode("MV03").taxPayerDescription("REG.TRGOVAC RABLJENIM MOT.VOZ.").selected(selectedCodes.contains("MV03")).build() //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        );
         return TaxPayerTypesResponse.builder()
                 .taxPayerTypes(types)
                 .build();
