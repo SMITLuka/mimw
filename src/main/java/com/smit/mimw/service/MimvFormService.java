@@ -62,8 +62,8 @@ public class MimvFormService {
      */
     public TaxPayerTypesResponse getTaxPayerTypes(String mandatorId, String companyId) {
         log.info("Fetching taxpayer types for mandatorId={}, companyId={}", mandatorId, companyId); //$NON-NLS-1$
-        String oib = as400Repository.fetchOib();
-        List<String> selectedCodes = as400Repository.fetchOdabraniTipoviObveznika(oib);
+        List<String> selectedCodes = as400Repository.fetchOdabraniTipoviObveznika();
+        log.info("selectedCodes: {}", selectedCodes); //$NON-NLS-1$
         List<TaxPayerType> types = List.of(
                 TaxPayerType.builder().taxPayerCode("MV01").taxPayerDescription("PROIZVOĐAČ MOTORNIH VOZILA").selected(selectedCodes.contains("MV01")).build(), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
                 TaxPayerType.builder().taxPayerCode("MV02").taxPayerDescription("TRGOVAC NOVIM MOT.VOZILIMA").selected(selectedCodes.contains("MV02")).build(), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
