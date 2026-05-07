@@ -404,13 +404,12 @@ public class As400Repository {
     }
 
     /**
-     * Inserts vehicle detail rows into MIMV_DETALJ by executing a DB2 SELECT
-     * on AS400 via the linked server and directing the result set into the local Pantheon table.
+     * Inserts vehicle detail rows into MIMV_DETALJ by executing a DB2 SELECT on AS400
+     * via the linked server and batch-inserting the result set locally.
      *
-     * T-SQL pattern used:
-     * <pre>
-     *   INSERT INTO MIMV_DETALJ (...) EXEC('DB2 SELECT ...') AT [linkedServer]
-     * </pre>
+     * Two-step approach to avoid DTC (Distributed Transaction Coordinator):
+     * 1. Execute EXEC('DB2 SELECT') AT [linkedServer] as a pure remote read — returns rows to Java, no local write involved, no DTC.
+     * 2. Batch INSERT the collected rows into MIMV_DETALJ locally.
      *
      * @throws IllegalStateException if no linked server is configured
      */
@@ -426,19 +425,35 @@ public class As400Repository {
                 seqNum, versionNum, dateFrom, dateTo, companyId);
 
         String escaped = db2Select.replace("'", "''"); //$NON-NLS-1$ //$NON-NLS-2$
+        String execSql = "EXEC('" + escaped + "') AT [" + linkedServer + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 
-        String sql = "INSERT INTO " + MIMV_DETALJ //$NON-NLS-1$
+        // Step 1: fetch rows from AS400 — pure remote read, no DTC needed
+        List<Object[]> rows = jdbcTemplate.query(execSql, (rs, rowNum) -> {
+            Object[] row = new Object[30];
+            for (int i = 0; i < 30; i++) {
+                row[i] = rs.getObject(i + 1);
+            }
+            return row;
+        });
+        log.info("Fetched {} rows from AS400 for MIMV_DETALJ insert", rows.size()); //$NON-NLS-1$
+
+        if (rows.isEmpty()) {
+            log.info("No AS400 rows to insert into MIMV_DETALJ"); //$NON-NLS-1$
+            return;
+        }
+
+        // Step 2: batch INSERT locally — no remote server involved, no DTC needed
+        String insertSql = "INSERT INTO " + MIMV_DETALJ //$NON-NLS-1$
                 + " (OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
                 + " SIFRA_VOZILA, STATUS_VOZILA, VRSTA_VOZILA, MARKA_VOZILA, TIP_VARIJANTA_TRG_NAZIV," //$NON-NLS-1$
                 + " VIN_OZNAKA, VRSTA_GORIVA, DATUM_PRVE_REGISTRACIJE, PROSJ_EMISIJA_CO2, RAZINA_EMISIJE," //$NON-NLS-1$
                 + " RADNI_OBUJAM_MOTORA, SNAGA_MOTORA, PRODAJNA_CIJENA, BROJ_PRIJEDJENIH_KM," //$NON-NLS-1$
                 + " KAMPER, PLUG_IN, VOZILO_71, VOZILO_81, TESTNO_VOZILO, DEPRECIJACIJA," //$NON-NLS-1$
                 + " POREZNI_OBVEZNIK, OIB, BROJ_RACUNA, DATUM_IZDAVANJA_RACUNA, OBRACUNATI_IZNOS_PP)" //$NON-NLS-1$
-                + " EXEC('" + escaped + "') AT [" + linkedServer + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"; //$NON-NLS-1$
 
-        log.debug("insertMimvDetalj SQL (first 500 chars): {}", sql.substring(0, Math.min(500, sql.length()))); //$NON-NLS-1$
-        jdbcTemplate.execute(sql);
-        log.info("INSERT INTO MIMV_DETALJ completed for formDate={}, sifobr={}", formDate, sifobr); //$NON-NLS-1$
+        jdbcTemplate.batchUpdate(insertSql, rows);
+        log.info("Batch-inserted {} rows into MIMV_DETALJ for formDate={}, sifobr={}", rows.size(), formDate, sifobr); //$NON-NLS-1$
     }
 
     /**
