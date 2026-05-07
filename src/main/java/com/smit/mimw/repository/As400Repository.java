@@ -409,7 +409,7 @@ public class As400Repository {
      *
      * T-SQL pattern used:
      * <pre>
-     *   INSERT INTO MIMV_DETALJ (...) SELECT * FROM OPENQUERY([linkedServer], 'DB2 SELECT ...')
+     *   INSERT INTO MIMV_DETALJ (...) EXEC('DB2 SELECT ...') AT [linkedServer]
      * </pre>
      *
      * @throws IllegalStateException if no linked server is configured
@@ -434,7 +434,7 @@ public class As400Repository {
                 + " RADNI_OBUJAM_MOTORA, SNAGA_MOTORA, PRODAJNA_CIJENA, BROJ_PRIJEDJENIH_KM," //$NON-NLS-1$
                 + " KAMPER, PLUG_IN, VOZILO_71, VOZILO_81, TESTNO_VOZILO, DEPRECIJACIJA," //$NON-NLS-1$
                 + " POREZNI_OBVEZNIK, OIB, BROJ_RACUNA, DATUM_IZDAVANJA_RACUNA, OBRACUNATI_IZNOS_PP)" //$NON-NLS-1$
-                + " SELECT * FROM OPENQUERY([" + linkedServer + "], '" + escaped + "')"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                + " EXEC('" + escaped + "') AT [" + linkedServer + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 
         log.debug("insertMimvDetalj SQL (first 500 chars): {}", sql.substring(0, Math.min(500, sql.length()))); //$NON-NLS-1$
         jdbcTemplate.execute(sql);
