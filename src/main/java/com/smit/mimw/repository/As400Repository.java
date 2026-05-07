@@ -225,6 +225,26 @@ public class As400Repository {
         }
     }
 
+    /**
+     * Saves selected taxpayer types for the given OIB into MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
+     * Deletes the existing row (if any) and re-inserts with the new BIT values.
+     *
+     * @param oib   OIB_OBVEZNIKA
+     * @param mv01  true if MV01_PROIZVOĐAČ should be set
+     * @param mv02  true if MV02_TRGOVAC_NOVIM should be set
+     * @param mv03  true if MV03_TRGOVAC_RABLJENIM should be set
+     */
+    public void upsertOdabraniTipoviObveznika(String oib, boolean mv01, boolean mv02, boolean mv03) {
+        jdbcTemplate.update(
+                "DELETE FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE OIB_OBVEZNIKA = ?", //$NON-NLS-1$
+                oib);
+        jdbcTemplate.update(
+                "INSERT INTO MIMV_ODABRANI_TIPOVI_OBVEZNIKA (OIB_OBVEZNIKA, [MV01_PROIZVOĐAČ], MV02_TRGOVAC_NOVIM, MV03_TRGOVAC_RABLJENIM)" //$NON-NLS-1$
+                + " VALUES (?, ?, ?, ?)", //$NON-NLS-1$
+                oib, mv01 ? 1 : 0, mv02 ? 1 : 0, mv03 ? 1 : 0);
+        log.info("Saved MIMV_ODABRANI_TIPOVI_OBVEZNIKA for oib=***: mv01={}, mv02={}, mv03={}", mv01, mv02, mv03); //$NON-NLS-1$
+    }
+
     // -------------------------------------------------------------------------
     // MIMV_ZAGLAVLJE — Pantheon MSSQL (local, no linked server)
     // -------------------------------------------------------------------------

@@ -75,8 +75,8 @@ public class MimvFormService {
     }
 
     /**
-     * Saves taxpayer type selection.
-     * TODO: implement AS400 write when the target table/program is confirmed.
+     * Saves taxpayer type selection into MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
+     * The request list represents the selected codes; any code absent from the list is stored as 0.
      */
     public IsSuccessResponse saveTaxPayerType(String mandatorId, String companyId, List<TaxPayerTypeRequest> requests) {
         log.info("saveTaxPayerType called for mandatorId={}, companyId={}, count={}", mandatorId, companyId, requests.size()); //$NON-NLS-1$
@@ -85,6 +85,12 @@ public class MimvFormService {
                 throw new IllegalArgumentException("taxPayerCode is required."); //$NON-NLS-1$
             }
         }
+        String oib = as400Repository.fetchOib();
+        boolean mv01 = requests.stream().anyMatch(r -> "MV01".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
+        boolean mv02 = requests.stream().anyMatch(r -> "MV02".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
+        boolean mv03 = requests.stream().anyMatch(r -> "MV03".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
+        as400Repository.upsertOdabraniTipoviObveznika(oib, mv01, mv02, mv03);
+        log.info("Saved taxpayer type selection: MV01={}, MV02={}, MV03={}", mv01, mv02, mv03); //$NON-NLS-1$
         return IsSuccessResponse.builder().isSuccess(true).build();
     }
 
