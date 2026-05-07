@@ -85,7 +85,11 @@ public class MimvFormService {
                 throw new IllegalArgumentException("taxPayerCode is required."); //$NON-NLS-1$
             }
         }
-        String oib = as400Repository.fetchOib();
+        String oib = as400Repository.fetchOibFromOdabraniTipoviObveznika();
+        if (oib == null) {
+            log.info("No existing row in MIMV_ODABRANI_TIPOVI_OBVEZNIKA, falling back to AS400 for OIB"); //$NON-NLS-1$
+            oib = as400Repository.fetchOib();
+        }
         boolean mv01 = requests.stream().anyMatch(r -> "MV01".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
         boolean mv02 = requests.stream().anyMatch(r -> "MV02".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
         boolean mv03 = requests.stream().anyMatch(r -> "MV03".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$

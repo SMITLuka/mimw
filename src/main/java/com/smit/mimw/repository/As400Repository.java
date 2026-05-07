@@ -201,6 +201,27 @@ public class As400Repository {
     // -------------------------------------------------------------------------
 
     /**
+     * Returns the OIB_OBVEZNIKA from the existing MIMV_ODABRANI_TIPOVI_OBVEZNIKA row, or null if no row exists.
+     * Used by saveTaxPayerType to avoid an AS400 round-trip when a row is already present.
+     */
+    public String fetchOibFromOdabraniTipoviObveznika() {
+        try {
+            List<String> result = jdbcTemplate.query(
+                    "SELECT TOP 1 OIB_OBVEZNIKA FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA", //$NON-NLS-1$
+                    (rs) -> {
+                        if (rs.next()) {
+                            return java.util.Collections.singletonList(rs.getString("OIB_OBVEZNIKA")); //$NON-NLS-1$
+                        }
+                        return java.util.Collections.emptyList();
+                    });
+            return result.isEmpty() ? null : result.get(0);
+        } catch (Exception e) {
+            log.warn("Could not fetch OIB from MIMV_ODABRANI_TIPOVI_OBVEZNIKA: {}", e.getMessage()); //$NON-NLS-1$
+            return null;
+        }
+    }
+
+    /**
      * Returns the list of active taxpayer type codes (MV01, MV02, MV03) from MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
      * Uses SELECT TOP 1 without OIB filter — single-company app, exactly one row expected.
      * Returns an empty list if no row exists or the query fails.
