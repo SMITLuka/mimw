@@ -13,6 +13,7 @@ public class TaxPayerTypeRequest {
 
     private String taxPayerCode;
     private String taxPayerDescription;
+    /** Whether this taxpayer type is selected. */
+    private boolean selected;
 
 }
-

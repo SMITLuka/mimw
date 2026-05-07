@@ -90,9 +90,9 @@ public class MimvFormService {
             log.info("No existing row in MIMV_ODABRANI_TIPOVI_OBVEZNIKA, falling back to AS400 for OIB"); //$NON-NLS-1$
             oib = as400Repository.fetchOib();
         }
-        boolean mv01 = requests.stream().anyMatch(r -> "MV01".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
-        boolean mv02 = requests.stream().anyMatch(r -> "MV02".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
-        boolean mv03 = requests.stream().anyMatch(r -> "MV03".equalsIgnoreCase(r.getTaxPayerCode())); //$NON-NLS-1$
+        boolean mv01 = requests.stream().anyMatch(r -> "MV01".equalsIgnoreCase(r.getTaxPayerCode()) && r.isSelected()); //$NON-NLS-1$
+        boolean mv02 = requests.stream().anyMatch(r -> "MV02".equalsIgnoreCase(r.getTaxPayerCode()) && r.isSelected()); //$NON-NLS-1$
+        boolean mv03 = requests.stream().anyMatch(r -> "MV03".equalsIgnoreCase(r.getTaxPayerCode()) && r.isSelected()); //$NON-NLS-1$
         as400Repository.upsertOdabraniTipoviObveznika(oib, mv01, mv02, mv03);
         log.info("Saved taxpayer type selection: MV01={}, MV02={}, MV03={}", mv01, mv02, mv03); //$NON-NLS-1$
         return IsSuccessResponse.builder().isSuccess(true).build();
