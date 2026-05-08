@@ -35,10 +35,10 @@
 
 WITH vehs AS (
     SELECT
-        hfs.hfskey,
-        hfs.HFSFZGART,
+        hfs.hfskey                                                                                  AS HFSKEY,
+        hfs.HFSFZGART                                                                               AS HFSFZGART,
         '1'                                                                                         AS vrsta_vozila,
-        klc.CHYSAA,
+        klc.CHYSAA                                                                                  AS CHYSAA,
         hfp.hfptxt                                                                                  AS naziv,
         TRIM(CASE WHEN UPPER(hfp.hfptxt) LIKE '%AUTOM%' THEN 'automatski' ELSE 'rucni' END)
             + ', ' +
@@ -48,28 +48,28 @@ WITH vehs AS (
             + ', ' +
             TRIM(CASE WHEN pcd.PCDLACKART = 'M' THEN 'metalik' ELSE 'obicna' END)
         ) - 2                                                                                       AS nazlen,
-        hfs.HFSFGST,
-        hfs.hfstrb,
-        hfs.HFSCO2,
-        hfs.HFSHUBR,
-        hfs.HFSKW,
-        hfs.HFSZULDAT,
-        hfs.hfskm,
-        hfs.HFSMAR,
+        hfs.HFSFGST                                                                                 AS HFSFGST,
+        hfs.hfstrb                                                                                  AS HFSTRB,
+        hfs.HFSCO2                                                                                  AS HFSCO2,
+        hfs.HFSHUBR                                                                                 AS HFSHUBR,
+        hfs.HFSKW                                                                                   AS HFSKW,
+        hfs.HFSZULDAT                                                                               AS HFSZULDAT,
+        hfs.hfskm                                                                                   AS HFSKM,
+        hfs.HFSMAR                                                                                  AS HFSMAR,
         CASE WHEN t1.HFBDATFTR >= 20170101
              THEN ''
              ELSE CASE WHEN UPPER(hfs.hfstrb) = 'N' THEN 'VI' ELSE '' END
         END                                                                                         AS razina_emisije,
-        hfk.hfbrpnm1,
-        hfk.HFKKFNM1,
+        hfk.hfbrpnm1                                                                               AS HFBRPNM1,
+        hfk.HFKKFNM1                                                                               AS HFKKFNM1,
         CASE WHEN hfk.hfbrpnm1 = '' THEN hfk.HFKKFUIDNR ELSE hfk.hfbrpuidnr END                   AS oib_poreznog,
-        t1.HFBBLFA,
-        t1.aenbet,
-        t1.anlbet,
-        t1.HFBDATFTR,
+        t1.HFBBLFA                                                                                  AS HFBBLFA,
+        t1.aenbet                                                                                   AS AENBET,
+        t1.anlbet                                                                                   AS ANLBET,
+        t1.HFBDATFTR                                                                                AS HFBDATFTR,
         CASE WHEN t2.HBJHRTBAS IS NULL THEN hfk.HFKHRTBAS ELSE t2.HBJHRTBAS END                   AS prod_cijena,
         CASE WHEN t2.HBJHRTVAL IS NULL THEN hfk.HFKHRTVAL ELSE t2.HBJHRTVAL END                   AS obracunati_pp,
-        perv.pesname
+        perv.pesname                                                                                AS PESNAME
     FROM
         [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFS]            AS hfs
         LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFK]  AS hfk  ON hfs.HFSKEY = hfk.HFKKEY
@@ -109,7 +109,7 @@ SELECT
     '<SIFOBR>'                                                                                      AS SIFRA_OBRASCA_PP,
     <RBR>                                                                                           AS REDNI_BROJ_PP,
     <RBRPROM>                                                                                       AS REDNI_BROJ_PP_PROM,
-    hfskey                                                                                          AS SIFRA_VOZILA,
+    HFSKEY                                                                                          AS SIFRA_VOZILA,
     CASE WHEN HFSFZGART IN ('A', 'G') THEN 'R'
          WHEN HFSFZGART = 'N'         THEN 'N'
          WHEN HFSFZGART = 'V'         THEN 'NT'
@@ -119,24 +119,24 @@ SELECT
     ISNULL(CHYSAA, '')                                                                              AS MARKA_VOZILA,
     LEFT(TRIM(LEFT(naziv, CASE WHEN nazlen > 0 THEN nazlen ELSE 0 END)) + ', ' + dodatak, 50)       AS TIP_VARIJANTA_TRG_NAZIV,
     TRIM(SUBSTRING(HFSFGST, 4, 17))                                                                 AS VIN_OZNAKA,
-    CASE WHEN UPPER(hfstrb) = 'N' THEN 'D' ELSE hfstrb END                                         AS VRSTA_GORIVA,
+    CASE WHEN UPPER(HFSTRB) = 'N' THEN 'D' ELSE HFSTRB END                                         AS VRSTA_GORIVA,
     HFSZULDAT                                                                                       AS DATUM_PRVE_REGISTRACIJE,
     HFSCO2                                                                                          AS PROSJ_EMISIJA_CO2,
     razina_emisije                                                                                  AS RAZINA_EMISIJE,
     CASE WHEN '<SIFPOD>' = '0000F7' THEN HFSHUBR ELSE 0 END                                        AS RADNI_OBUJAM_MOTORA,
     HFSKW                                                                                           AS SNAGA_MOTORA,
     prod_cijena                                                                                     AS PRODAJNA_CIJENA,
-    hfskm                                                                                           AS BROJ_PRIJEDJENIH_KM,
+    HFSKM                                                                                           AS BROJ_PRIJEDJENIH_KM,
     ''                                                                                              AS KAMPER,
     0                                                                                               AS PLUG_IN,
     ''                                                                                              AS VOZILO_71,
     ''                                                                                              AS VOZILO_81,
     CAST(0 AS DECIMAL(7,2))                                                                         AS TESTNO_VOZILO,
     CAST(0 AS DECIMAL(7,2))                                                                         AS DEPRECIJACIJA,
-    LEFT(CASE WHEN hfbrpnm1 = '' THEN HFKKFNM1 ELSE hfbrpnm1 END, 80)                              AS POREZNI_OBVEZNIK,
+    LEFT(CASE WHEN HFBRPNM1 = '' THEN HFKKFNM1 ELSE HFBRPNM1 END, 80)                              AS POREZNI_OBVEZNIK,
     CASE WHEN oib_poreznog IS NOT NULL THEN LEFT(oib_poreznog, 11) ELSE '' END                      AS OIB,
-    LEFT(TRIM(CAST(HFBBLFA AS VARCHAR(20))) + '/' + TRIM(CAST(CASE WHEN aenbet > 0 THEN aenbet ELSE anlbet END AS VARCHAR(20))) + '/6', 30) AS BROJ_RACUNA,
+    LEFT(TRIM(CAST(HFBBLFA AS VARCHAR(20))) + '/' + TRIM(CAST(CASE WHEN AENBET > 0 THEN AENBET ELSE ANLBET END AS VARCHAR(20))) + '/6', 30) AS BROJ_RACUNA,
     HFBDATFTR                                                                                       AS DATUM_IZDAVANJA_RACUNA,
     obracunati_pp                                                                                   AS OBRACUNATI_IZNOS_PP
 FROM vehs
-ORDER BY pesname, HFSMAR, HFBDATFTR
+ORDER BY PESNAME, HFSMAR, HFBDATFTR
