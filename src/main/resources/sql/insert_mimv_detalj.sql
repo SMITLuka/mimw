@@ -69,18 +69,18 @@ WITH vehs AS (
         CASE WHEN t2.HBJHRTVAL IS NULL THEN hfk.HFKHRTVAL ELSE t2.HBJHRTVAL END                   AS obracunati_pp,
         perv.pesname
     FROM
-        [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfs]            AS hfs
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfk]  AS hfk  ON hfs.HFSKEY = hfk.HFKKEY
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[perv] AS perv ON hfk.HFKVK = perv.pebper
-        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfb]  AS t1   ON hfs.HFSKEY = t1.HFBKEY
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hbj]  AS t2   ON
+        [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFS]            AS hfs
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFK]  AS hfk  ON hfs.HFSKEY = hfk.HFKKEY
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[PERV] AS perv ON hfk.HFKVK = perv.pebper
+        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFB]  AS t1   ON hfs.HFSKEY = t1.HFBKEY
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HBJ]  AS t2   ON
             t1.HFBKEY = t2.HBJHFSKEY1
             AND t1.HFBBLFA = t2.HBJBNR
             AND t2.HBJBDAT = t1.HFBDATFTR
             AND t2.HBJAKT IN ('FA', 'FG')
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfp]  AS hfp  ON hfs.HFSKEY = hfp.HFPHFSNR
-        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[mar]  AS mar  ON mar.marmar = hfs.HFSMAR
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[pcd]  AS pcd  ON hfs.hfsfar = pcd.pcdpcd AND hfs.hfsmar = pcd.pcdmar
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFP]  AS hfp  ON hfs.HFSKEY = hfp.HFPHFSNR
+        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[MAR]  AS mar  ON mar.marmar = hfs.HFSMAR
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[PCD]  AS pcd  ON hfs.hfsfar = pcd.pcdpcd AND hfs.hfsmar = pcd.pcdmar
         LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[IVASXT].[KLCHCPP]   AS klc  ON UPPER(mar.martxt) = klc.CHL6AQ
     WHERE
         t1.HFBDATFTR BETWEEN <ODDATUMA> AND <DODATUMA>
