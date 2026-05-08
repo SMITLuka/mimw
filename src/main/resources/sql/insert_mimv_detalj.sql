@@ -65,9 +65,9 @@ WITH vehs AS (
              THEN ''
              ELSE CASE WHEN UPPER(hfs.HFSTRB) = 'N' THEN 'VI' ELSE '' END
         END                                                                                         AS razina_emisije,
-        hfk.HFBRPNM1                                                                               AS HFBRPNM1,
+        t1.HFBRPNM1                                                                                AS HFBRPNM1,
         hfk.HFKKFNM1                                                                               AS HFKKFNM1,
-        CASE WHEN hfk.HFBRPNM1 = '' THEN hfk.HFKKFUIDNR ELSE hfk.HFBRPUIDNR END                   AS oib_poreznog,
+        CASE WHEN t1.HFBRPNM1 = '' THEN hfk.HFKKFUIDNR ELSE t1.HFBRPUIDNR END                     AS oib_poreznog,
         t1.HFBBLFA                                                                                  AS HFBBLFA,
         t1.AENBET                                                                                   AS AENBET,
         t1.ANLBET                                                                                   AS ANLBET,
