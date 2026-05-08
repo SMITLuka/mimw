@@ -31,9 +31,14 @@ spring:
 # AS400_LINKED_SERVER: name of the linked server in SQL Server (from _cdp_param.aclinkserver)
 #                      Leave blank to auto-read from _cdp_param table at startup.
 # AS400_CATALOG:       AS400 database/catalog name (default: ADRIAVC1)
+# AS400_DATA_GROUP:    AS400 data group prefix (e.g. KB0). Combined with AS400_BRANCH to compute
+#                      the HF library: (dataGroup + "D" + branch).substring(0,4) + "1K"
+# AS400_BRANCH:        AS400 branch number (e.g. 1). Used together with AS400_DATA_GROUP.
 as400:
   linked-server: ${AS400_LINKED_SERVER:}
   catalog: ${AS400_CATALOG:ADRIAVC1}
+  data-group: ${AS400_DATA_GROUP:}
+  branch: ${AS400_BRANCH:1}
 
 server:
   port: ${PORT:8081}

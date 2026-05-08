@@ -1,17 +1,26 @@
 -- ============================================================
--- DB2 SELECT for INSERT INTO MIMV_DETALJ (Pantheon)
--- Executed via EXEC('...') AT [linkedServer] from T-SQL wrapper.
+-- T-SQL SELECT for INSERT INTO MIMV_DETALJ (Pantheon)
+-- Executed directly via JdbcTemplate against Pantheon MSSQL.
+-- All AS400 tables are accessed via 4-part linked server naming:
+--   [linkedServer].[catalog].[library].[table]
+--
+-- HF tables (hfs, hfk, hfb, etc.) use <HFLIBRARY> (e.g. KB0D1K).
+-- KLCHCPP (brand lookup) uses hardcoded library IVASXT.
+-- MIMV_ODABRANI_TIPOVI_OBVEZNIKA is a local Pantheon MSSQL table — no linked server prefix.
 -- ============================================================
 -- Placeholders replaced at runtime:
---   <SIFPOD>    mandatorId               (e.g. 0000B0)
---   <OIB>       OIB obveznika            (e.g. 30985203273)
---   <DATUM>     DatumPP as YYYYMMDD int  (e.g. 20260401)
---   <SIFOBR>    SifraObrascaPP           (e.g. 401 or 405)
---   <RBR>       RedniBrojPP              (e.g. 1)
---   <RBRPROM>   RedniBrojPPPromjena      (e.g. 0)
---   <ODDATUMA>  Period start YYYYMMDD    (dateFrom)
---   <DODATUMA>  Period end   YYYYMMDD    (dateTo)
---   <BRANCH>    Company branch number    (companyId)
+--   <LINKEDSERVER>  AS400 linked server name   (e.g. RENAULT)
+--   <CATALOG>       AS400 catalog name          (e.g. ADRIAVC1)
+--   <HFLIBRARY>     AS400 HF tables library     (e.g. KB0D1K)
+--   <SIFPOD>        mandatorId                  (e.g. 0000B0)
+--   <OIB>           OIB obveznika               (e.g. 30985203273)
+--   <DATUM>         DatumPP as YYYYMMDD int      (e.g. 20260401)
+--   <SIFOBR>        SifraObrascaPP              (e.g. 401 or 405)
+--   <RBR>           RedniBrojPP                 (e.g. 1)
+--   <RBRPROM>       RedniBrojPPPromjena         (e.g. 0)
+--   <ODDATUMA>      Period start YYYYMMDD       (dateFrom)
+--   <DODATUMA>      Period end   YYYYMMDD       (dateTo)
+--   <BRANCH>        Company branch number       (companyId)
 -- ============================================================
 -- Column order matches MIMV_DETALJ:
 --   OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM,
@@ -22,129 +31,110 @@
 --   POREZNI_OBVEZNIK, OIB, BROJ_RACUNA, DATUM_IZDAVANJA_RACUNA, OBRACUNATI_IZNOS_PP
 -- ============================================================
 
-select
-'<OIB>'                                                                                     OIB_OBVEZNIKA,
-<DATUM>                                                                                     DATUM_PP,
-'<SIFOBR>'                                                                                  SIFRA_OBRASCA_PP,
-<RBR>                                                                                       REDNI_BROJ_PP,
-<RBRPROM>                                                                                   REDNI_BROJ_PP_PROM,
-hfskey                                                                                      SIFRA_VOZILA,
-case when HFSFZGART in ('A', 'G') then 'R'
-     when HFSFZGART = 'N'         then 'N'
-     when HFSFZGART = 'V'         then 'NT'
-     else HFSFZGART
-end                                                                                         STATUS_VOZILA,
-vrsta_vozila                                                                                VRSTA_VOZILA,
-ifnull(CHYSAA, '')                                                                          MARKA_VOZILA,
-left(trim(left(naziv, nazlen)) || ', ' || dodatak, 50)                                      TIP_VARIJANTA_TRG_NAZIV,
-trim(substr(HFSFGST, 4, 17))                                                                VIN_OZNAKA,
-case when upper(hfstrb) = 'N' then 'D' else hfstrb end                                     VRSTA_GORIVA,
-HFSZULDAT                                                                                   DATUM_PRVE_REGISTRACIJE,
-HFSCO2                                                                                      PROSJ_EMISIJA_CO2,
-razina_emisije                                                                              RAZINA_EMISIJE,
-case when '<SIFPOD>' = '0000F7' then HFSHUBR else 0 end                                    RADNI_OBUJAM_MOTORA,
-HFSKW                                                                                       SNAGA_MOTORA,
-prod_cijena                                                                                 PRODAJNA_CIJENA,
-hfskm                                                                                       BROJ_PRIJEDJENIH_KM,
-''                                                                                          KAMPER,
-0                                                                                           PLUG_IN,
-''                                                                                          VOZILO_71,
-''                                                                                          VOZILO_81,
-dec('0', 7, 2)                                                                              TESTNO_VOZILO,
-dec('0', 7, 2)                                                                              DEPRECIJACIJA,
-left(case when hfbrpnm1 = '' then HFKKFNM1 else hfbrpnm1 end, 80)                          POREZNI_OBVEZNIK,
-case when oib_poreznog is not null then left(oib_poreznog, 11) else '' end                  OIB,
-left(trim(char(HFBBLFA)) || '/' || trim(char(case when t1.aenbet > 0 then t1.aenbet else t1.anlbet end)) || '/6', 30) BROJ_RACUNA,
-HFBDATFTR                                                                                   DATUM_IZDAVANJA_RACUNA,
-obracunati_pp                                                                               OBRACUNATI_IZNOS_PP
-from
-(select
-    hfskey,
-    HFSFZGART,
-    '1'                                                                                     as vrsta_vozila,
-    CHYSAA,
-    hfptxt                                                                                  as naziv,
-    trim(case when upper(hfptxt) like '%AUTOM%' then 'automatski' else 'rucni' end)
-        || ', ' ||
-    trim(case when PCDLACKART = 'M' then 'metalik' else 'obicna' end)                      as dodatak,
-    50 - length(
-        trim(case when upper(hfptxt) like '%AUTOM%' then 'automatski' else 'rucni' end)
-        || ', ' ||
-        trim(case when PCDLACKART = 'M' then 'metalik' else 'obicna' end)
-    ) - 2                                                                                   as nazlen,
-    HFSFGST,
-    hfstrb,
-    HFSCO2,
-    HFSHUBR,
-    HFSKW,
-    HFSZULDAT,
-    hfskm,
-    case when HFBDATFTR >= 20170101
-         then ''
-         else case when upper(hfstrb) = 'N' then 'VI' else '' end
-    end                                                                                     as razina_emisije,
-    case when hfbrpnm1 = '' then HFKKFNM1   else hfbrpnm1   end                            as porezni_obveznik,
-    case when hfbrpnm1 = '' then HFKKFUIDNR else hfbrpuidnr end                            as oib_poreznog,
-    HFBBLFA,
-    t1.aenbet,
-    t1.anlbet,
-    HFBDATFTR,
-    case when HBJHRTBAS is null then HFKHRTBAS else HBJHRTBAS end                          as prod_cijena,
-    case when HBJHRTVAL is null then HFKHRTVAL else HBJHRTVAL end                          as obracunati_pp
-from
-    hfs hfs
-    left join hfk on HFSKEY = HFKKEY
-    left join perv on HFKVK = pebper
-    join hfb t1 on HFSKEY = HFBKEY
-    left join hbj t2 on
-        HFBKEY = HBJHFSKEY1 and
-        HFBBLFA = HBJBNR and
-        HBJBDAT = HFBDATFTR and
-        HBJAKT in ('FA', 'FG')
-    left join hfp on HFSKEY = HFPHFSNR
-    join mar on marmar = HFSMAR
-    left join pcd on hfsfar = pcdpcd and hfsmar = pcdmar
-    left join ivasxt.klchcpp on upper(martxt) = CHL6AQ
-where
-    HFBDATFTR between <ODDATUMA> and <DODATUMA>
-    and (
-        case when HFKDATZOLL <> 0 then HFKDATZOLL end between <ODDATUMA> and <DODATUMA>
-        or HFKDATZOLL = 0
-        or HFKDATZOLL >= <DODATUMA>
-    )
-    and HFSVKSTS = 'F'
-    and HFPPART = 'F'
-    and HFKHRTKZ <> ''
-    and (HFKHRTVAL <> 0 or (HBJHRTVAL is not null and HBJHRTVAL <> 0))
-    and case when HBJHRTBAS is null then HFKHRTBAS else HBJHRTBAS end > 0
-    and (
-        HFSFZGART in (
-            select tipvoz from (
-                select 'N' tipvoz from sysibm.sysdummy1
-                union all
-                select 'V' tipvoz from sysibm.sysdummy1
-            ) t
-            where exists (
-                select * from ivasdet
-                where aupgm = 'KMDPDFR'
-                and locate('MV02', auhhap) > 0
-            )
+WITH vehs AS (
+    SELECT
+        hfs.hfskey,
+        hfs.HFSFZGART,
+        '1'                                                                                         AS vrsta_vozila,
+        klc.CHYSAA,
+        hfp.hfptxt                                                                                  AS naziv,
+        TRIM(CASE WHEN UPPER(hfp.hfptxt) LIKE '%AUTOM%' THEN 'automatski' ELSE 'rucni' END)
+            + ', ' +
+        TRIM(CASE WHEN pcd.PCDLACKART = 'M' THEN 'metalik' ELSE 'obicna' END)                      AS dodatak,
+        50 - LEN(
+            TRIM(CASE WHEN UPPER(hfp.hfptxt) LIKE '%AUTOM%' THEN 'automatski' ELSE 'rucni' END)
+            + ', ' +
+            TRIM(CASE WHEN pcd.PCDLACKART = 'M' THEN 'metalik' ELSE 'obicna' END)
+        ) - 2                                                                                       AS nazlen,
+        hfs.HFSFGST,
+        hfs.hfstrb,
+        hfs.HFSCO2,
+        hfs.HFSHUBR,
+        hfs.HFSKW,
+        hfs.HFSZULDAT,
+        hfs.hfskm,
+        hfs.HFSMAR,
+        CASE WHEN t1.HFBDATFTR >= 20170101
+             THEN ''
+             ELSE CASE WHEN UPPER(hfs.hfstrb) = 'N' THEN 'VI' ELSE '' END
+        END                                                                                         AS razina_emisije,
+        hfk.hfbrpnm1,
+        hfk.HFKKFNM1,
+        CASE WHEN hfk.hfbrpnm1 = '' THEN hfk.HFKKFUIDNR ELSE hfk.hfbrpuidnr END                   AS oib_poreznog,
+        t1.HFBBLFA,
+        t1.aenbet,
+        t1.anlbet,
+        t1.HFBDATFTR,
+        CASE WHEN t2.HBJHRTBAS IS NULL THEN hfk.HFKHRTBAS ELSE t2.HBJHRTBAS END                   AS prod_cijena,
+        CASE WHEN t2.HBJHRTVAL IS NULL THEN hfk.HFKHRTVAL ELSE t2.HBJHRTVAL END                   AS obracunati_pp,
+        perv.pesname
+    FROM
+        [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfs]            AS hfs
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfk]  AS hfk  ON hfs.HFSKEY = hfk.HFKKEY
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[perv] AS perv ON hfk.HFKVK = perv.pebper
+        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfb]  AS t1   ON hfs.HFSKEY = t1.HFBKEY
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hbj]  AS t2   ON
+            t1.HFBKEY = t2.HBJHFSKEY1
+            AND t1.HFBBLFA = t2.HBJBNR
+            AND t2.HBJBDAT = t1.HFBDATFTR
+            AND t2.HBJAKT IN ('FA', 'FG')
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[hfp]  AS hfp  ON hfs.HFSKEY = hfp.HFPHFSNR
+        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[mar]  AS mar  ON mar.marmar = hfs.HFSMAR
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[pcd]  AS pcd  ON hfs.hfsfar = pcd.pcdpcd AND hfs.hfsmar = pcd.pcdmar
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[IVASXT].[KLCHCPP]   AS klc  ON UPPER(mar.martxt) = klc.CHL6AQ
+    WHERE
+        t1.HFBDATFTR BETWEEN <ODDATUMA> AND <DODATUMA>
+        AND (
+            CASE WHEN hfk.HFKDATZOLL <> 0 THEN hfk.HFKDATZOLL END BETWEEN <ODDATUMA> AND <DODATUMA>
+            OR hfk.HFKDATZOLL = 0
+            OR hfk.HFKDATZOLL >= <DODATUMA>
         )
-        or
-        HFSFZGART in (
-            select tipvoz from (
-                select 'A' tipvoz from sysibm.sysdummy1
-                union all
-                select 'G' tipvoz from sysibm.sysdummy1
-            ) t
-            where exists (
-                select * from ivasdet
-                where aupgm = 'KMDPDFR'
-                and locate('MV03', auhhap) > 0
-            )
+        AND hfs.HFSVKSTS = 'F'
+        AND hfp.HFPPART = 'F'
+        AND hfk.HFKHRTKZ <> ''
+        AND (hfk.HFKHRTVAL <> 0 OR (t2.HBJHRTVAL IS NOT NULL AND t2.HBJHRTVAL <> 0))
+        AND CASE WHEN t2.HBJHRTBAS IS NULL THEN hfk.HFKHRTBAS ELSE t2.HBJHRTBAS END > 0
+        AND (
+            (hfs.HFSFZGART IN ('N', 'V') AND EXISTS (SELECT 1 FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE MV02_TRGOVAC_NOVIM = 1))
+            OR
+            (hfs.HFSFZGART IN ('A', 'G') AND EXISTS (SELECT 1 FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE MV03_TRGOVAC_RABLJENIM = 1))
         )
-    )
-    and case when t1.aenbet > 0 then t1.aenbet else t1.anlbet end = <BRANCH>
-    and (char(hfskey) not in ('') or '' in (''))
-order by pesname, HFSMAR, HFBDATFTR
-) t
+        AND CASE WHEN t1.aenbet > 0 THEN t1.aenbet ELSE t1.anlbet END = <BRANCH>
+)
+SELECT
+    '<OIB>'                                                                                         AS OIB_OBVEZNIKA,
+    <DATUM>                                                                                         AS DATUM_PP,
+    '<SIFOBR>'                                                                                      AS SIFRA_OBRASCA_PP,
+    <RBR>                                                                                           AS REDNI_BROJ_PP,
+    <RBRPROM>                                                                                       AS REDNI_BROJ_PP_PROM,
+    hfskey                                                                                          AS SIFRA_VOZILA,
+    CASE WHEN HFSFZGART IN ('A', 'G') THEN 'R'
+         WHEN HFSFZGART = 'N'         THEN 'N'
+         WHEN HFSFZGART = 'V'         THEN 'NT'
+         ELSE HFSFZGART
+    END                                                                                             AS STATUS_VOZILA,
+    vrsta_vozila                                                                                    AS VRSTA_VOZILA,
+    ISNULL(CHYSAA, '')                                                                              AS MARKA_VOZILA,
+    LEFT(TRIM(LEFT(naziv, CASE WHEN nazlen > 0 THEN nazlen ELSE 0 END)) + ', ' + dodatak, 50)       AS TIP_VARIJANTA_TRG_NAZIV,
+    TRIM(SUBSTRING(HFSFGST, 4, 17))                                                                 AS VIN_OZNAKA,
+    CASE WHEN UPPER(hfstrb) = 'N' THEN 'D' ELSE hfstrb END                                         AS VRSTA_GORIVA,
+    HFSZULDAT                                                                                       AS DATUM_PRVE_REGISTRACIJE,
+    HFSCO2                                                                                          AS PROSJ_EMISIJA_CO2,
+    razina_emisije                                                                                  AS RAZINA_EMISIJE,
+    CASE WHEN '<SIFPOD>' = '0000F7' THEN HFSHUBR ELSE 0 END                                        AS RADNI_OBUJAM_MOTORA,
+    HFSKW                                                                                           AS SNAGA_MOTORA,
+    prod_cijena                                                                                     AS PRODAJNA_CIJENA,
+    hfskm                                                                                           AS BROJ_PRIJEDJENIH_KM,
+    ''                                                                                              AS KAMPER,
+    0                                                                                               AS PLUG_IN,
+    ''                                                                                              AS VOZILO_71,
+    ''                                                                                              AS VOZILO_81,
+    CAST(0 AS DECIMAL(7,2))                                                                         AS TESTNO_VOZILO,
+    CAST(0 AS DECIMAL(7,2))                                                                         AS DEPRECIJACIJA,
+    LEFT(CASE WHEN hfbrpnm1 = '' THEN HFKKFNM1 ELSE hfbrpnm1 END, 80)                              AS POREZNI_OBVEZNIK,
+    CASE WHEN oib_poreznog IS NOT NULL THEN LEFT(oib_poreznog, 11) ELSE '' END                      AS OIB,
+    LEFT(TRIM(CAST(HFBBLFA AS VARCHAR(20))) + '/' + TRIM(CAST(CASE WHEN aenbet > 0 THEN aenbet ELSE anlbet END AS VARCHAR(20))) + '/6', 30) AS BROJ_RACUNA,
+    HFBDATFTR                                                                                       AS DATUM_IZDAVANJA_RACUNA,
+    obracunati_pp                                                                                   AS OBRACUNATI_IZNOS_PP
+FROM vehs
+ORDER BY pesname, HFSMAR, HFBDATFTR

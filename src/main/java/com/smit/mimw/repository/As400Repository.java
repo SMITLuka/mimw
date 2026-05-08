@@ -53,13 +53,26 @@ public class As400Repository {
     @Value("${as400.catalog:ADRIAVC1}")
     private String catalog;
 
+    /** AS400 data group prefix (e.g. KB0). Used together with branch to compute hfLibrary. */
+    @Value("${as400.data-group:}")
+    private String dataGroup;
+
+    /** AS400 branch number (e.g. 1). Used together with dataGroup to compute hfLibrary. */
+    @Value("${as400.branch:1}")
+    private String branch;
+
+    /** HF tables library — computed from dataGroup and branch in init(). e.g. KB0D1K */
+    private String hfLibrary;
+
     public As400Repository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
     /**
-     * If linkedServer was not provided via env var, try to read it from
-     * _cdp_param — the same table Pantheon reads on startup.
+     * Resolves linked server name and computes the HF library name.
+     * If linkedServer was not provided via env var, auto-reads it from _cdp_param.
+     * hfLibrary is derived from dataGroup + branch: (dataGroup + "D" + branch).substring(0,4) + "1K"
+     * — e.g. dataGroup=KB0, branch=1 → KB0D1K.
      */
     @PostConstruct
     public void init() {
@@ -78,6 +91,14 @@ public class As400Repository {
             }
         } else {
             log.info("Using linked server from env var: '{}'", linkedServer); //$NON-NLS-1$
+        }
+
+        if (dataGroup != null && !dataGroup.isBlank()) {
+            String cdpLib = dataGroup + "D" + (branch != null ? branch : "1"); //$NON-NLS-1$ //$NON-NLS-2$
+            hfLibrary = cdpLib.substring(0, Math.min(4, cdpLib.length())) + "1K"; //$NON-NLS-1$
+            log.info("Computed HF library: '{}' (dataGroup='{}', branch='{}')", hfLibrary, dataGroup, branch); //$NON-NLS-1$
+        } else {
+            log.warn("as400.data-group is not set. HF library cannot be computed — MIMV_DETALJ inserts will fail."); //$NON-NLS-1$
         }
     }
 
@@ -404,14 +425,16 @@ public class As400Repository {
     }
 
     /**
-     * Inserts vehicle detail rows into MIMV_DETALJ by executing a DB2 SELECT on AS400
-     * via the linked server and batch-inserting the result set locally.
+     * Inserts vehicle detail rows into MIMV_DETALJ.
      *
      * Two-step approach to avoid DTC (Distributed Transaction Coordinator):
-     * 1. Execute EXEC('DB2 SELECT') AT [linkedServer] as a pure remote read — returns rows to Java, no local write involved, no DTC.
+     * 1. Execute the T-SQL SELECT directly against Pantheon MSSQL — AS400 HF tables are
+     *    accessed via 4-part linked server naming ([linkedServer].[catalog].[library].[table]).
+     *    The vehicle type filter uses MIMV_ODABRANI_TIPOVI_OBVEZNIKA (local MSSQL table).
+     *    No EXEC AT is used, so no DTC is triggered.
      * 2. Batch INSERT the collected rows into MIMV_DETALJ locally.
      *
-     * @throws IllegalStateException if no linked server is configured
+     * @throws IllegalStateException if linked server or HF library is not configured
      */
     public void insertMimvDetalj(String mandatorId, String oib, int formDate, String sifobr,
                                   int seqNum, int versionNum,
@@ -420,15 +443,16 @@ public class As400Repository {
             throw new IllegalStateException("AS400 linked server is required for MIMV_DETALJ insert. " //$NON-NLS-1$
                     + "Configure AS400_LINKED_SERVER or _cdp_param.aclinkserver."); //$NON-NLS-1$
         }
+        if (hfLibrary == null || hfLibrary.isBlank()) {
+            throw new IllegalStateException("AS400 HF library is required for MIMV_DETALJ insert. " //$NON-NLS-1$
+                    + "Configure AS400_DATA_GROUP (and optionally AS400_BRANCH)."); //$NON-NLS-1$
+        }
 
-        String db2Select = loadDetaljSelectSql(mandatorId, oib, formDate, sifobr,
+        // Step 1: execute T-SQL with 4-part linked server names directly — no EXEC AT, no DTC
+        String tsql = loadDetaljSelectSql(mandatorId, oib, formDate, sifobr,
                 seqNum, versionNum, dateFrom, dateTo, companyId);
 
-        String escaped = db2Select.replace("'", "''"); //$NON-NLS-1$ //$NON-NLS-2$
-        String execSql = "EXEC('" + escaped + "') AT [" + linkedServer + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
-
-        // Step 1: fetch rows from AS400 — pure remote read, no DTC needed
-        List<Object[]> rows = jdbcTemplate.query(execSql, (rs, rowNum) -> {
+        List<Object[]> rows = jdbcTemplate.query(tsql, (rs, rowNum) -> {
             Object[] row = new Object[30];
             for (int i = 0; i < 30; i++) {
                 row[i] = rs.getObject(i + 1);
@@ -538,7 +562,7 @@ public class As400Repository {
     /**
      * Loads insert_mimv_detalj.sql from the classpath, strips comment lines,
      * and replaces all runtime placeholders with the provided values.
-     * Returns the plain DB2 SELECT string — no EXEC AT wrapping applied here.
+     * Returns a ready-to-execute T-SQL SELECT string.
      */
     private String loadDetaljSelectSql(String mandatorId, String oib, int formDate, String sifobr,
                                         int seqNum, int versionNum,
@@ -556,15 +580,18 @@ public class As400Repository {
             }
             String sql = sb.toString();
 
-            sql = sql.replace("<SIFPOD>",   mandatorId != null ? mandatorId : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<OIB>",      oib != null ? oib : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<DATUM>",    String.valueOf(formDate)); //$NON-NLS-1$
-            sql = sql.replace("<SIFOBR>",   sifobr != null ? sifobr : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<RBR>",      String.valueOf(seqNum)); //$NON-NLS-1$
-            sql = sql.replace("<RBRPROM>",  String.valueOf(versionNum)); //$NON-NLS-1$
-            sql = sql.replace("<ODDATUMA>", dateFrom != null ? dateFrom : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<DODATUMA>", dateTo != null ? dateTo : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<BRANCH>",   companyId != null ? companyId : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<LINKEDSERVER>", linkedServer != null ? linkedServer : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<CATALOG>",      catalog != null ? catalog : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<HFLIBRARY>",    hfLibrary != null ? hfLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<SIFPOD>",       mandatorId != null ? mandatorId : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<OIB>",          oib != null ? oib : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<DATUM>",        String.valueOf(formDate)); //$NON-NLS-1$
+            sql = sql.replace("<SIFOBR>",       sifobr != null ? sifobr : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<RBR>",          String.valueOf(seqNum)); //$NON-NLS-1$
+            sql = sql.replace("<RBRPROM>",      String.valueOf(versionNum)); //$NON-NLS-1$
+            sql = sql.replace("<ODDATUMA>",     dateFrom != null ? dateFrom : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<DODATUMA>",     dateTo != null ? dateTo : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<BRANCH>",       companyId != null ? companyId : ""); //$NON-NLS-1$ //$NON-NLS-2$
 
             return sql.trim();
         } catch (Exception e) {
