@@ -67,6 +67,9 @@ public class As400Repository {
     /** Main data library — computed from dataGroup and branch in init(). e.g. KB0D1 */
     private String mainLibrary;
 
+    /** P library — computed from dataGroup and branch in init(). e.g. KB0DP */
+    private String pLibrary;
+
     public As400Repository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -99,9 +102,11 @@ public class As400Repository {
         if (dataGroup != null && !dataGroup.isBlank()) {
             String br = branch != null ? branch : "1"; //$NON-NLS-1$
             String cdpLib = dataGroup + "D" + br; //$NON-NLS-1$
+            String prefix = cdpLib.substring(0, Math.min(4, cdpLib.length()));
             mainLibrary = cdpLib;
-            hfLibrary = cdpLib.substring(0, Math.min(4, cdpLib.length())) + "1K"; //$NON-NLS-1$
-            log.info("Computed libraries: main='{}', hf='{}' (dataGroup='{}', branch='{}')", mainLibrary, hfLibrary, dataGroup, br); //$NON-NLS-1$
+            hfLibrary   = prefix + "1K"; //$NON-NLS-1$
+            pLibrary    = prefix + "P"; //$NON-NLS-1$
+            log.info("Computed libraries: main='{}', hf='{}', p='{}' (dataGroup='{}', branch='{}')", mainLibrary, hfLibrary, pLibrary, dataGroup, br); //$NON-NLS-1$
         } else {
             log.warn("as400.data-group is not set. AS400 libraries cannot be computed — MIMV_DETALJ inserts will fail."); //$NON-NLS-1$
         }
@@ -588,6 +593,7 @@ public class As400Repository {
             sql = sql.replace("<LINKEDSERVER>",  linkedServer != null ? linkedServer : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<CATALOG>",       catalog != null ? catalog : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<MAINLIBRARY>",   mainLibrary != null ? mainLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<PLIBRARY>",      pLibrary != null ? pLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<HFLIBRARY>",     hfLibrary != null ? hfLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<SIFPOD>",       mandatorId != null ? mandatorId : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<OIB>",          oib != null ? oib : ""); //$NON-NLS-1$ //$NON-NLS-2$

@@ -12,7 +12,8 @@
 --   <LINKEDSERVER>  AS400 linked server name   (e.g. RENAULT)
 --   <CATALOG>       AS400 catalog name          (e.g. ADRIAVC1)
 --   <HFLIBRARY>     AS400 HF tables library     (e.g. KB0D1K)
---   <MAINLIBRARY>   AS400 main data library     (e.g. KB0D1)  -- used for PERV
+--   <MAINLIBRARY>   AS400 main data library     (e.g. KB0D1)   -- used for PERV
+--   <PLIBRARY>      AS400 P library             (e.g. KB0DP)  -- used for MAR, PCD
 --   <SIFPOD>        mandatorId                  (e.g. 0000B0)
 --   <OIB>           OIB obveznika               (e.g. 30985203273)
 --   <DATUM>         DatumPP as YYYYMMDD int      (e.g. 20260401)
@@ -80,8 +81,8 @@ WITH vehs AS (
             AND t2.HBJBDAT = t1.HFBDATFTR
             AND t2.HBJAKT IN ('FA', 'FG')
         LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFP]  AS hfp  ON hfs.HFSKEY = hfp.HFPHFSNR
-        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[MAR]  AS mar  ON mar.marmar = hfs.HFSMAR
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[PCD]  AS pcd  ON hfs.hfsfar = pcd.pcdpcd AND hfs.hfsmar = pcd.pcdmar
+        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<PLIBRARY>].[MAR]    AS mar  ON mar.marmar = hfs.HFSMAR
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<PLIBRARY>].[PCD]   AS pcd  ON hfs.hfsfar = pcd.pcdpcd AND hfs.hfsmar = pcd.pcdmar
         LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[IVASXT].[KLCHCPP]   AS klc  ON UPPER(mar.martxt) = klc.CHL6AQ
     WHERE
         t1.HFBDATFTR BETWEEN <ODDATUMA> AND <DODATUMA>
