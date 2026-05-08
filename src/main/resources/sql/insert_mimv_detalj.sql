@@ -12,6 +12,7 @@
 --   <LINKEDSERVER>  AS400 linked server name   (e.g. RENAULT)
 --   <CATALOG>       AS400 catalog name          (e.g. ADRIAVC1)
 --   <HFLIBRARY>     AS400 HF tables library     (e.g. KB0D1K)
+--   <MAINLIBRARY>   AS400 main data library     (e.g. KB0D1)  -- used for PERV
 --   <SIFPOD>        mandatorId                  (e.g. 0000B0)
 --   <OIB>           OIB obveznika               (e.g. 30985203273)
 --   <DATUM>         DatumPP as YYYYMMDD int      (e.g. 20260401)
@@ -71,7 +72,7 @@ WITH vehs AS (
     FROM
         [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFS]            AS hfs
         LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFK]  AS hfk  ON hfs.HFSKEY = hfk.HFKKEY
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[PERV] AS perv ON hfk.HFKVK = perv.pebper
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<MAINLIBRARY>].[PERV] AS perv ON hfk.HFKVK = perv.pebper
         JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFB]  AS t1   ON hfs.HFSKEY = t1.HFBKEY
         LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HBJ]  AS t2   ON
             t1.HFBKEY = t2.HBJHFSKEY1

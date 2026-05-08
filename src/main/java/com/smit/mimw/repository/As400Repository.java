@@ -64,6 +64,9 @@ public class As400Repository {
     /** HF tables library — computed from dataGroup and branch in init(). e.g. KB0D1K */
     private String hfLibrary;
 
+    /** Main data library — computed from dataGroup and branch in init(). e.g. KB0D1 */
+    private String mainLibrary;
+
     public As400Repository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -94,11 +97,13 @@ public class As400Repository {
         }
 
         if (dataGroup != null && !dataGroup.isBlank()) {
-            String cdpLib = dataGroup + "D" + (branch != null ? branch : "1"); //$NON-NLS-1$ //$NON-NLS-2$
+            String br = branch != null ? branch : "1"; //$NON-NLS-1$
+            String cdpLib = dataGroup + "D" + br; //$NON-NLS-1$
+            mainLibrary = cdpLib;
             hfLibrary = cdpLib.substring(0, Math.min(4, cdpLib.length())) + "1K"; //$NON-NLS-1$
-            log.info("Computed HF library: '{}' (dataGroup='{}', branch='{}')", hfLibrary, dataGroup, branch); //$NON-NLS-1$
+            log.info("Computed libraries: main='{}', hf='{}' (dataGroup='{}', branch='{}')", mainLibrary, hfLibrary, dataGroup, br); //$NON-NLS-1$
         } else {
-            log.warn("as400.data-group is not set. HF library cannot be computed — MIMV_DETALJ inserts will fail."); //$NON-NLS-1$
+            log.warn("as400.data-group is not set. AS400 libraries cannot be computed — MIMV_DETALJ inserts will fail."); //$NON-NLS-1$
         }
     }
 
@@ -580,9 +585,10 @@ public class As400Repository {
             }
             String sql = sb.toString();
 
-            sql = sql.replace("<LINKEDSERVER>", linkedServer != null ? linkedServer : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<CATALOG>",      catalog != null ? catalog : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<HFLIBRARY>",    hfLibrary != null ? hfLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<LINKEDSERVER>",  linkedServer != null ? linkedServer : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<CATALOG>",       catalog != null ? catalog : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<MAINLIBRARY>",   mainLibrary != null ? mainLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<HFLIBRARY>",     hfLibrary != null ? hfLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<SIFPOD>",       mandatorId != null ? mandatorId : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<OIB>",          oib != null ? oib : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<DATUM>",        String.valueOf(formDate)); //$NON-NLS-1$
