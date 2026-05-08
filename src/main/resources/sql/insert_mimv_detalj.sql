@@ -5,15 +5,20 @@
 --   [linkedServer].[catalog].[library].[table]
 --
 -- HF tables (hfs, hfk, hfb, etc.) use <HFLIBRARY> (e.g. KB0D1K).
+-- PERV uses <MAINLIBRARY> (e.g. KB0D1).
+-- MAR, PCD use <PLIBRARY> (e.g. KB0DP).
 -- KLCHCPP (brand lookup) uses hardcoded library IVASXT.
 -- MIMV_ODABRANI_TIPOVI_OBVEZNIKA is a local Pantheon MSSQL table — no linked server prefix.
+--
+-- All AS400 column names are uppercase throughout — MSDASQL returns column metadata in
+-- uppercase and Pantheon SQL Server uses a case-sensitive collation.
 -- ============================================================
 -- Placeholders replaced at runtime:
 --   <LINKEDSERVER>  AS400 linked server name   (e.g. RENAULT)
 --   <CATALOG>       AS400 catalog name          (e.g. ADRIAVC1)
 --   <HFLIBRARY>     AS400 HF tables library     (e.g. KB0D1K)
---   <MAINLIBRARY>   AS400 main data library     (e.g. KB0D1)   -- used for PERV
---   <PLIBRARY>      AS400 P library             (e.g. KB0DP)  -- used for MAR, PCD
+--   <MAINLIBRARY>   AS400 main data library     (e.g. KB0D1)   -- PERV
+--   <PLIBRARY>      AS400 P library             (e.g. KB0DP)   -- MAR, PCD
 --   <SIFPOD>        mandatorId                  (e.g. 0000B0)
 --   <OIB>           OIB obveznika               (e.g. 30985203273)
 --   <DATUM>         DatumPP as YYYYMMDD int      (e.g. 20260401)
@@ -35,55 +40,55 @@
 
 WITH vehs AS (
     SELECT
-        hfs.hfskey                                                                                  AS HFSKEY,
+        hfs.HFSKEY                                                                                  AS HFSKEY,
         hfs.HFSFZGART                                                                               AS HFSFZGART,
         '1'                                                                                         AS vrsta_vozila,
         klc.CHYSAA                                                                                  AS CHYSAA,
-        hfp.hfptxt                                                                                  AS naziv,
-        TRIM(CASE WHEN UPPER(hfp.hfptxt) LIKE '%AUTOM%' THEN 'automatski' ELSE 'rucni' END)
+        hfp.HFPTXT                                                                                  AS naziv,
+        TRIM(CASE WHEN UPPER(hfp.HFPTXT) LIKE '%AUTOM%' THEN 'automatski' ELSE 'rucni' END)
             + ', ' +
         TRIM(CASE WHEN pcd.PCDLACKART = 'M' THEN 'metalik' ELSE 'obicna' END)                      AS dodatak,
         50 - LEN(
-            TRIM(CASE WHEN UPPER(hfp.hfptxt) LIKE '%AUTOM%' THEN 'automatski' ELSE 'rucni' END)
+            TRIM(CASE WHEN UPPER(hfp.HFPTXT) LIKE '%AUTOM%' THEN 'automatski' ELSE 'rucni' END)
             + ', ' +
             TRIM(CASE WHEN pcd.PCDLACKART = 'M' THEN 'metalik' ELSE 'obicna' END)
         ) - 2                                                                                       AS nazlen,
         hfs.HFSFGST                                                                                 AS HFSFGST,
-        hfs.hfstrb                                                                                  AS HFSTRB,
+        hfs.HFSTRB                                                                                  AS HFSTRB,
         hfs.HFSCO2                                                                                  AS HFSCO2,
         hfs.HFSHUBR                                                                                 AS HFSHUBR,
         hfs.HFSKW                                                                                   AS HFSKW,
         hfs.HFSZULDAT                                                                               AS HFSZULDAT,
-        hfs.hfskm                                                                                   AS HFSKM,
+        hfs.HFSKM                                                                                   AS HFSKM,
         hfs.HFSMAR                                                                                  AS HFSMAR,
         CASE WHEN t1.HFBDATFTR >= 20170101
              THEN ''
-             ELSE CASE WHEN UPPER(hfs.hfstrb) = 'N' THEN 'VI' ELSE '' END
+             ELSE CASE WHEN UPPER(hfs.HFSTRB) = 'N' THEN 'VI' ELSE '' END
         END                                                                                         AS razina_emisije,
-        hfk.hfbrpnm1                                                                               AS HFBRPNM1,
+        hfk.HFBRPNM1                                                                               AS HFBRPNM1,
         hfk.HFKKFNM1                                                                               AS HFKKFNM1,
-        CASE WHEN hfk.hfbrpnm1 = '' THEN hfk.HFKKFUIDNR ELSE hfk.hfbrpuidnr END                   AS oib_poreznog,
+        CASE WHEN hfk.HFBRPNM1 = '' THEN hfk.HFKKFUIDNR ELSE hfk.HFBRPUIDNR END                   AS oib_poreznog,
         t1.HFBBLFA                                                                                  AS HFBBLFA,
-        t1.aenbet                                                                                   AS AENBET,
-        t1.anlbet                                                                                   AS ANLBET,
+        t1.AENBET                                                                                   AS AENBET,
+        t1.ANLBET                                                                                   AS ANLBET,
         t1.HFBDATFTR                                                                                AS HFBDATFTR,
         CASE WHEN t2.HBJHRTBAS IS NULL THEN hfk.HFKHRTBAS ELSE t2.HBJHRTBAS END                   AS prod_cijena,
         CASE WHEN t2.HBJHRTVAL IS NULL THEN hfk.HFKHRTVAL ELSE t2.HBJHRTVAL END                   AS obracunati_pp,
-        perv.pesname                                                                                AS PESNAME
+        perv.PESNAME                                                                                AS PESNAME
     FROM
-        [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFS]            AS hfs
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFK]  AS hfk  ON hfs.HFSKEY = hfk.HFKKEY
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<MAINLIBRARY>].[PERV] AS perv ON hfk.HFKVK = perv.pebper
-        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFB]  AS t1   ON hfs.HFSKEY = t1.HFBKEY
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HBJ]  AS t2   ON
+        [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFS]             AS hfs
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFK]   AS hfk  ON hfs.HFSKEY = hfk.HFKKEY
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<MAINLIBRARY>].[PERV] AS perv ON hfk.HFKVK = perv.PEBPER
+        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFB]   AS t1   ON hfs.HFSKEY = t1.HFBKEY
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HBJ]   AS t2   ON
             t1.HFBKEY = t2.HBJHFSKEY1
             AND t1.HFBBLFA = t2.HBJBNR
             AND t2.HBJBDAT = t1.HFBDATFTR
             AND t2.HBJAKT IN ('FA', 'FG')
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFP]  AS hfp  ON hfs.HFSKEY = hfp.HFPHFSNR
-        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<PLIBRARY>].[MAR]    AS mar  ON mar.marmar = hfs.HFSMAR
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<PLIBRARY>].[PCD]   AS pcd  ON hfs.hfsfar = pcd.pcdpcd AND hfs.hfsmar = pcd.pcdmar
-        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[IVASXT].[KLCHCPP]   AS klc  ON UPPER(mar.martxt) = klc.CHL6AQ
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<HFLIBRARY>].[HFP]   AS hfp  ON hfs.HFSKEY = hfp.HFPHFSNR
+        JOIN      [<LINKEDSERVER>].[<CATALOG>].[<PLIBRARY>].[MAR]    AS mar  ON mar.MARMAR = hfs.HFSMAR
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[<PLIBRARY>].[PCD]    AS pcd  ON hfs.HFSFAR = pcd.PCDPCD AND hfs.HFSMAR = pcd.PCDMAR
+        LEFT JOIN [<LINKEDSERVER>].[<CATALOG>].[IVASXT].[KLCHCPP]    AS klc  ON UPPER(mar.MARTXT) = klc.CHL6AQ
     WHERE
         t1.HFBDATFTR BETWEEN <ODDATUMA> AND <DODATUMA>
         AND (
@@ -101,7 +106,7 @@ WITH vehs AS (
             OR
             (hfs.HFSFZGART IN ('A', 'G') AND EXISTS (SELECT 1 FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE MV03_TRGOVAC_RABLJENIM = 1))
         )
-        AND CASE WHEN t1.aenbet > 0 THEN t1.aenbet ELSE t1.anlbet END = <BRANCH>
+        AND CASE WHEN t1.AENBET > 0 THEN t1.AENBET ELSE t1.ANLBET END = <BRANCH>
 )
 SELECT
     '<OIB>'                                                                                         AS OIB_OBVEZNIKA,
