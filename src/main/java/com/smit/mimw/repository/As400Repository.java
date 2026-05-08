@@ -388,6 +388,22 @@ public class As400Repository {
     }
 
     /**
+     * Updates the three total columns on an existing MIMV_ZAGLAVLJE row.
+     * Called after MIMV_DETALJ rows are inserted and summed, since ZAGLAVLJE must
+     * exist before DETALJ due to FK_DETALJ_ZAGLAVLJE.
+     */
+    public void updateMimvZaglavljeTotals(String oib, int formDate, String sifobr, int seqNum, int versionNum,
+                                           BigDecimal totalNew, BigDecimal totalUsed) {
+        BigDecimal totalAll = totalNew.add(totalUsed);
+        int rows = jdbcTemplate.update(
+                "UPDATE " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " SET UKUP_IZNOS_NOVA = ?, UKUP_IZNOS_RABLJENA = ?, UKUP_IZNOS_NOVA_I_RAB = ?" //$NON-NLS-1$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                totalNew, totalUsed, totalAll, oib, formDate, sifobr, seqNum, versionNum);
+        log.info("Updated MIMV_ZAGLAVLJE totals ({} row): totalNew={}, totalUsed={}", rows, totalNew, totalUsed); //$NON-NLS-1$
+    }
+
+    /**
      * Fetches all MIMV_ZAGLAVLJE rows ordered by DATUM_PP descending.
      * Used by GET /mimv/preview/existing.
      */

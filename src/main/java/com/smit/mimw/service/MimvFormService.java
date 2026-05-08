@@ -135,31 +135,32 @@ public class MimvFormService {
         String dateFrom = request.getDateFrom() != null ? request.getDateFrom().format(YYYYMMDD) : ""; //$NON-NLS-1$
         String dateTo   = request.getDateTo()   != null ? request.getDateTo().format(YYYYMMDD)   : ""; //$NON-NLS-1$
 
-        // 2. Delete existing detail rows (idempotency)
+        // 2. Build composite identifier: oib-formDate-sifobr-seq-version
+        String compositeId = String.format("%s-%s-%s-%02d-%03d", //$NON-NLS-1$
+                oib != null ? oib : "", formDateInt, sifobr != null ? sifobr : "", seqNum, versionNum); //$NON-NLS-1$ //$NON-NLS-2$
+
+        // 3. Delete existing detail rows first (FK child before parent)
         as400Repository.deleteMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
 
-        // 3. Insert MIMV_DETALJ from AS400 HF tables
+        // 4. Delete existing header row
+        as400Repository.deleteMimvZaglavlje(oib, formDateInt, sifobr, seqNum, versionNum);
+
+        // 5. Insert MIMV_ZAGLAVLJE with zero totals as placeholder — must exist before DETALJ due to FK_DETALJ_ZAGLAVLJE
+        String actionCode = request.getActionCode() != null ? request.getActionCode() : "N"; //$NON-NLS-1$
+        as400Repository.insertMimvZaglavlje(oib, formDateInt, sifobr, compositeId,
+                request, companyData.getCompanyDescription(), companyData.getCompanySeat(),
+                BigDecimal.ZERO, BigDecimal.ZERO);
+
+        // 6. Insert MIMV_DETALJ from AS400 HF tables — FK satisfied by step 5
         as400Repository.insertMimvDetalj(mandatorId, oib, formDateInt, sifobr,
                 seqNum, versionNum, dateFrom, dateTo, companyId);
 
-        // 4. Compute totals from inserted detail rows
+        // 7. Compute totals from inserted detail rows and update header
         BigDecimal[] totals = as400Repository.sumMimvDetaljTotals(oib, formDateInt, sifobr, seqNum, versionNum);
         BigDecimal totalNew  = totals[0];
         BigDecimal totalUsed = totals[1];
         log.info("Computed totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
-
-        // 5. Build composite identifier: oib-formDate-sifobr-seq-version
-        String compositeId = String.format("%s-%s-%s-%02d-%03d", //$NON-NLS-1$
-                oib != null ? oib : "", formDateInt, sifobr != null ? sifobr : "", seqNum, versionNum); //$NON-NLS-1$ //$NON-NLS-2$
-
-        // 6. Delete existing header row (idempotency)
-        as400Repository.deleteMimvZaglavlje(oib, formDateInt, sifobr, seqNum, versionNum);
-
-        // 7. Insert MIMV_ZAGLAVLJE with fetched company data
-        String actionCode = request.getActionCode() != null ? request.getActionCode() : "N"; //$NON-NLS-1$
-        as400Repository.insertMimvZaglavlje(oib, formDateInt, sifobr, compositeId,
-                request, companyData.getCompanyDescription(), companyData.getCompanySeat(),
-                totalNew, totalUsed);
+        as400Repository.updateMimvZaglavljeTotals(oib, formDateInt, sifobr, seqNum, versionNum, totalNew, totalUsed);
 
         // 8. Fetch the just-inserted detail rows and selected taxpayer types for the response
         List<MimvDetaljItem> detalji = as400Repository.fetchMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
