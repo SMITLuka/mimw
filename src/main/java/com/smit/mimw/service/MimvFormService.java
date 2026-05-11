@@ -5,6 +5,9 @@ import com.smit.mimw.dto.BrandsResponse;
 import com.smit.mimw.dto.CompanyData;
 import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.FormBuildResponse;
+import com.smit.mimw.dto.FormUpdateData;
+import com.smit.mimw.dto.FormUpdateRequest;
+import com.smit.mimw.dto.ZaglavljeUpdateData;
 import com.smit.mimw.dto.IsSuccessResponse;
 import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
@@ -211,6 +214,97 @@ public class MimvFormService {
         log.info("Fetched {} MIMV_ZAGLAVLJE rows", processed.size()); //$NON-NLS-1$
         return PreviewExistingResponse.builder()
                 .mimvProcessed(processed)
+                .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // Form update — POST /mimv/form/build/update
+    // -------------------------------------------------------------------------
+
+    /**
+     * Updates an existing MIMV form in Pantheon MSSQL.
+     * OIB is fetched from AS400 (read-only, same as /form/build). All other data comes from the request.
+     * <ol>
+     *   <li>Fetch OIB from AS400 KB0D1.HDB (transparent to caller)</li>
+     *   <li>Resolve SIFRA_OBRASCA_PP from taxPayerCode</li>
+     *   <li>Delete existing MIMV_DETALJ rows (FK child before parent)</li>
+     *   <li>Delete existing MIMV_ZAGLAVLJE row</li>
+     *   <li>Re-insert MIMV_ZAGLAVLJE from request data (zero-total placeholder)</li>
+     *   <li>Batch-insert MIMV_DETALJ from request detalji list</li>
+     *   <li>Recompute totals and update MIMV_ZAGLAVLJE</li>
+     * </ol>
+     * Returns the same {@link FormBuildResponse} structure as POST /mimv/form/build.
+     *
+     * @param mandatorId mandator identifier from request header
+     * @param companyId  company identifier from request header
+     * @param request    update payload — form key + mutable zaglavlje fields + replacement detalji
+     */
+    public FormBuildResponse updateForm(String mandatorId, String companyId, FormUpdateRequest request)
+    {
+        FormUpdateData     d       = request.getData();
+        ZaglavljeUpdateData z      = d.getZaglavlje();
+        List<MimvDetaljItem> detalji = d.getDetalji();
+
+        String oib        = as400Repository.fetchOib();
+        String sifobr     = toSifobr(d.getTaxPayerCode());
+        int    formDate   = d.getFormDate()                    != null ? d.getFormDate()                    : 0;
+        int    seqNum     = d.getSequentialNumberInPeriod()    != null ? d.getSequentialNumberInPeriod()    : 1;
+        int    versionNum = d.getVersionNumber()               != null ? d.getVersionNumber()               : 1;
+
+        log.info("updateForm: formDate={}, taxPayerCode={}, sifobr={}, seq={}, ver={}", //$NON-NLS-1$
+                formDate, d.getTaxPayerCode(), sifobr, seqNum, versionNum);
+
+        String compositeId = String.format("%s-%s-%s-%02d-%03d", //$NON-NLS-1$
+                oib != null ? oib : "", formDate, sifobr != null ? sifobr : "", seqNum, versionNum); //$NON-NLS-1$ //$NON-NLS-2$
+
+        // Delete child rows first (FK constraint), then parent
+        as400Repository.deleteMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);
+        as400Repository.deleteMimvZaglavlje(oib, formDate, sifobr, seqNum, versionNum);
+
+        // Insert ZAGLAVLJE placeholder — must exist before DETALJ due to FK_DETALJ_ZAGLAVLJE
+        as400Repository.insertMimvZaglavljeFromZaglavlje(oib, formDate, sifobr, seqNum, versionNum,
+                compositeId, d.getTaxPayerCode(), z, BigDecimal.ZERO, BigDecimal.ZERO);
+
+        // Insert DETALJ from request body
+        as400Repository.insertMimvDetaljFromItems(detalji, oib, formDate, sifobr, seqNum, versionNum);
+
+        // Recompute totals and update ZAGLAVLJE
+        BigDecimal[] totals  = as400Repository.sumMimvDetaljTotals(oib, formDate, sifobr, seqNum, versionNum);
+        BigDecimal totalNew  = totals[0];
+        BigDecimal totalUsed = totals[1];
+        log.info("updateForm totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
+        as400Repository.updateMimvZaglavljeTotals(oib, formDate, sifobr, seqNum, versionNum, totalNew, totalUsed);
+
+        // Fetch persisted rows for response
+        List<MimvDetaljItem> savedDetalji  = as400Repository.fetchMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);
+        List<String>         selectedTypes = as400Repository.fetchOdabraniTipoviObveznika(oib);
+
+        MimvZaglavljeItem zaglavljeResponse = MimvZaglavljeItem.builder()
+                .id(compositeId)
+                .oibObveznika(oib)
+                .datumPP(formDate)
+                .sifraObrascaPP(sifobr)
+                .redniBrojPP(seqNum)
+                .redniBrojPPProm(versionNum)
+                .actionCode(z.getActionCode() != null ? z.getActionCode() : "N") //$NON-NLS-1$
+                .dateFrom(z.getDateFrom())
+                .dateTo(z.getDateTo())
+                .taxOfficeCode(z.getTaxOfficeCode())
+                .taxOfficeDescription(z.getTaxOfficeDescription())
+                .companyDescription(z.getCompanyDescription())
+                .companySeat(z.getCompanySeat())
+                .destinationEmail(z.getDestinationEmail())
+                .responsiblePerson(z.getResponsiblePerson())
+                .taxPayerCode(d.getTaxPayerCode())
+                .taxNewVehiclesSum(totalNew)
+                .taxUsedVehiclesSum(totalUsed)
+                .taxTotalSum(totalNew.add(totalUsed))
+                .selectedTaxPayerTypes(selectedTypes)
+                .build();
+
+        return FormBuildResponse.builder()
+                .zaglavlje(zaglavljeResponse)
+                .detalji(savedDetalji)
                 .build();
     }
 

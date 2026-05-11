@@ -582,6 +582,106 @@ public class As400Repository {
     }
 
     // -------------------------------------------------------------------------
+    // Update-flow inserts — data supplied by caller, no AS400 reads
+    // -------------------------------------------------------------------------
+
+    /**
+     * Inserts a MIMV_ZAGLAVLJE row in the update flow.
+     * The form key (oib, formDate, sifobr, seqNum, versionNum) and compositeId are resolved
+     * by the caller; mutable display fields come from {@link com.smit.mimw.dto.ZaglavljeUpdateData}.
+     * Pass {@code BigDecimal.ZERO} for totals as a placeholder; call
+     * {@link #updateMimvZaglavljeTotals} after DETALJ rows are summed.
+     *
+     * @param oib          OIB_OBVEZNIKA (fetched from AS400 by the service)
+     * @param formDate     DATUM_PP as YYYYMMDD integer
+     * @param sifobr       SIFRA_OBRASCA_PP (401 or 405)
+     * @param seqNum       REDNI_BROJ_PP
+     * @param versionNum   REDNI_BROJ_PP_PROM
+     * @param compositeId  IDENTIFIKATOR (pre-built composite key string)
+     * @param taxPayerCode TIPOVI_OBVEZNIKA (MV01/MV02/MV03)
+     * @param z            mutable display fields from the request body
+     * @param totalNew     UKUP_IZNOS_NOVA placeholder
+     * @param totalUsed    UKUP_IZNOS_RABLJENA placeholder
+     */
+    public void insertMimvZaglavljeFromZaglavlje(String oib, int formDate, String sifobr,
+                                                  int seqNum, int versionNum, String compositeId,
+                                                  String taxPayerCode,
+                                                  com.smit.mimw.dto.ZaglavljeUpdateData z,
+                                                  BigDecimal totalNew, BigDecimal totalUsed)
+    {
+        BigDecimal totalAll = totalNew.add(totalUsed);
+        String action      = z.getActionCode() != null ? z.getActionCode() : "N"; //$NON-NLS-1$
+        Integer obdobljeOd = z.getDateFrom() != null ? Integer.parseInt(z.getDateFrom().format(YYYYMMDD)) : null;
+        Integer obdobljeDo = z.getDateTo()   != null ? Integer.parseInt(z.getDateTo().format(YYYYMMDD))   : null;
+
+        jdbcTemplate.update(
+                "INSERT INTO " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " (OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+                + " IDENTIFIKATOR, AKCIJA_PP, RAZDOBLJE_OD, RAZDOBLJE_DO," //$NON-NLS-1$
+                + " CARINSKI_URED, CARINSKI_URED_OPIS, NAZIV_OBVEZNIKA, SJEDISTE_OBVEZNIKA," //$NON-NLS-1$
+                + " EMAIL_ADRESA, ODGOVORNA_OSOBA, TIPOVI_OBVEZNIKA," //$NON-NLS-1$
+                + " UKUP_IZNOS_NOVA, UKUP_IZNOS_RABLJENA, UKUP_IZNOS_NOVA_I_RAB)" //$NON-NLS-1$
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", //$NON-NLS-1$
+                oib, formDate, sifobr, seqNum, versionNum,
+                compositeId, action, obdobljeOd, obdobljeDo,
+                z.getTaxOfficeCode(), z.getTaxOfficeDescription(),
+                z.getCompanyDescription(), z.getCompanySeat(),
+                z.getDestinationEmail(), z.getResponsiblePerson(),
+                taxPayerCode,
+                totalNew, totalUsed, totalAll);
+
+        log.info("Inserted MIMV_ZAGLAVLJE (update flow): id={}", compositeId); //$NON-NLS-1$
+    }
+
+    /**
+     * Batch-inserts MIMV_DETALJ rows from a caller-supplied list.
+     * Key fields (oib, formDate, sifobr, seqNum, versionNum) are taken from the
+     * zaglavlje parameters; any key values present on the individual items are ignored.
+     *
+     * @param items      vehicle detail rows to persist
+     * @param oib        OIB_OBVEZNIKA (form key)
+     * @param formDate   DATUM_PP as YYYYMMDD integer (form key)
+     * @param sifobr     SIFRA_OBRASCA_PP (form key)
+     * @param seqNum     REDNI_BROJ_PP (form key)
+     * @param versionNum REDNI_BROJ_PP_PROM (form key)
+     */
+    public void insertMimvDetaljFromItems(List<com.smit.mimw.dto.MimvDetaljItem> items,
+                                           String oib, int formDate, String sifobr,
+                                           int seqNum, int versionNum)
+    {
+        if (items == null || items.isEmpty())
+        {
+            log.info("No MIMV_DETALJ items to insert (update flow)"); //$NON-NLS-1$
+            return;
+        }
+
+        String insertSql = "INSERT INTO " + MIMV_DETALJ //$NON-NLS-1$
+                + " (OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+                + " SIFRA_VOZILA, STATUS_VOZILA, VRSTA_VOZILA, MARKA_VOZILA, TIP_VARIJANTA_TRG_NAZIV," //$NON-NLS-1$
+                + " VIN_OZNAKA, VRSTA_GORIVA, DATUM_PRVE_REGISTRACIJE, PROSJ_EMISIJA_CO2, RAZINA_EMISIJE," //$NON-NLS-1$
+                + " RADNI_OBUJAM_MOTORA, SNAGA_MOTORA, PRODAJNA_CIJENA, BROJ_PRIJEDJENIH_KM," //$NON-NLS-1$
+                + " KAMPER, PLUG_IN, VOZILO_71, VOZILO_81, TESTNO_VOZILO, DEPRECIJACIJA," //$NON-NLS-1$
+                + " POREZNI_OBVEZNIK, OIB, BROJ_RACUNA, DATUM_IZDAVANJA_RACUNA, OBRACUNATI_IZNOS_PP)" //$NON-NLS-1$
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"; //$NON-NLS-1$
+
+        List<Object[]> rows = items.stream().map(item -> new Object[]{
+                oib, formDate, sifobr, seqNum, versionNum,
+                item.getSifraVozila(), item.getStatusVozila(), item.getVrstaVozila(),
+                item.getMarkaVozila(), item.getTipVarijantaTrgNaziv(), item.getVinOznaka(),
+                item.getVrstaGoriva(), item.getDatumPrveRegistracije(), item.getProsjEmisijaCO2(),
+                item.getRazinaEmisije(), item.getRadniObujamMotora(), item.getSnagaMotora(),
+                item.getProdajnaCijena(), item.getBrojPrijedjenihKm(), item.getKamper(),
+                item.getPlugIn(), item.getVozilo71(), item.getVozilo81(),
+                item.getTestnoVozilo(), item.getDeprecijacija(), item.getPorezniObveznik(),
+                item.getOib(), item.getBrojRacuna(), item.getDatumIzdavanjaRacuna(),
+                item.getObracunatiIznosPP()
+        }).collect(Collectors.toList());
+
+        jdbcTemplate.batchUpdate(insertSql, rows);
+        log.info("Batch-inserted {} rows into MIMV_DETALJ (update flow)", rows.size()); //$NON-NLS-1$
+    }
+
+    // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
 

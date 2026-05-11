@@ -4,6 +4,7 @@ import com.smit.mimw.dto.ApiResponse;
 import com.smit.mimw.dto.BrandsResponse;
 import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.FormBuildResponse;
+import com.smit.mimw.dto.FormUpdateRequest;
 import com.smit.mimw.dto.IsSuccessResponse;
 import com.smit.mimw.dto.PreviewExistingResponse;
 import com.smit.mimw.dto.TaxOfficesResponse;
@@ -74,6 +75,23 @@ public class MimvFormController {
 
         FormBuildResponse response = mimvFormService.buildForm(mandatorId, companyId, request);
         return ResponseEntity.ok(ApiResponse.ok(response, "Form built successfully.")); //$NON-NLS-1$
+    }
+
+    /**
+     * POST /mimv/form/build/update
+     * Replaces an existing MIMV form in Pantheon MSSQL using caller-supplied data.
+     * No AS400 reads are performed — all zaglavlje and detalji data comes from the request body.
+     * The form is identified by the key fields inside request.data.zaglavlje
+     * (oibObveznika, datumPP, sifraObrascaPP, redniBrojPP, redniBrojPPProm).
+     */
+    @PostMapping("/form/build/update") //$NON-NLS-1$
+    public ResponseEntity<ApiResponse<FormBuildResponse>> updateForm(
+            @RequestHeader("mandatorId") String mandatorId, //$NON-NLS-1$
+            @RequestHeader("companyId") String companyId, //$NON-NLS-1$
+            @RequestBody FormUpdateRequest request)
+    {
+        FormBuildResponse response = mimvFormService.updateForm(mandatorId, companyId, request);
+        return ResponseEntity.ok(ApiResponse.ok(response, "Form updated successfully.")); //$NON-NLS-1$
     }
 
     /**
