@@ -39,6 +39,10 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
         <!-- AS400 / iSeries JT400 JDBC driver (direct connection fallback) -->
         <dependency>
             <groupId>net.sf.jt400</groupId>

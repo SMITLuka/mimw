@@ -27,6 +27,18 @@ spring:
       max-lifetime: 600000
       initialization-fail-timeout: -1
 
+  mail:
+    host: ${MAIL_HOST:mail.smtp2go.com}
+    port: ${MAIL_PORT:2525}
+    username: ${MAIL_USERNAME:adriavc1}
+    password: ${MAIL_PASSWORD:a1234c}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 # --- AS400 Linked Server config ---
 # AS400_LINKED_SERVER: name of the linked server in SQL Server (from _cdp_param.aclinkserver)
 #                      Leave blank to auto-read from _cdp_param table at startup.
@@ -42,3 +54,7 @@ as400:
 
 server:
   port: ${PORT:8081}
+
+mimw:
+  mail:
+    from: ${MAIL_FROM:mi-mv@sm-it.hr}

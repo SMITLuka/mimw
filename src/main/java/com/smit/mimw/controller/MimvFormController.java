@@ -11,6 +11,7 @@ import com.smit.mimw.dto.TaxOfficesResponse;
 import com.smit.mimw.dto.TaxPayerTypeRequest;
 import com.smit.mimw.dto.TaxPayerTypesResponse;
 import com.smit.mimw.service.MimvFormService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -118,6 +119,23 @@ public class MimvFormController {
 
         BrandsResponse response = mimvFormService.getBrands(mandatorId, companyId);
         return ResponseEntity.ok(ApiResponse.ok(response, "Brands fetched successfully.")); //$NON-NLS-1$
+    }
+
+    /**
+     * POST /mimv/form/confirm
+     * Validates form data, builds an ET405AA XML document, and emails it to the destinationEmail
+     * specified in zaglavlje. Uses the same request body as POST /mimv/form/build/update.
+     * Returns HTTP 400 with a Croatian description of all missing fields on validation failure.
+     */
+    @PostMapping("/form/confirm") //$NON-NLS-1$
+    public ResponseEntity<ApiResponse<Void>> confirmForm(
+            @RequestHeader("mandatorId") String mandatorId, //$NON-NLS-1$
+            @RequestHeader("companyId") String companyId, //$NON-NLS-1$
+            @RequestBody FormUpdateRequest request)
+    {
+        String email = mimvFormService.confirmForm(mandatorId, companyId, request);
+        String msg   = "Obrazac Uspješno poslan na " + email + "!"; //$NON-NLS-1$ //$NON-NLS-2$
+        return ResponseEntity.status(HttpStatus.OK).body(ApiResponse.ok(null, msg));
     }
 
     /**

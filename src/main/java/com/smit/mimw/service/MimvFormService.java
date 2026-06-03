@@ -19,14 +19,25 @@ import com.smit.mimw.dto.TaxPayerType;
 import com.smit.mimw.dto.TaxPayerTypeRequest;
 import com.smit.mimw.dto.TaxPayerTypesResponse;
 import com.smit.mimw.repository.As400Repository;
+import com.smit.mimw.util.MimvXmlBuilder;
+import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Service for all MIMV form operations.
@@ -51,7 +62,14 @@ public class MimvFormService {
 
     private final As400Repository as400Repository;
 
-    public MimvFormService(As400Repository as400Repository) {
+    @Autowired(required = false)
+    private JavaMailSender mailSender;
+
+    @Value("${mimw.mail.from:noreply@smit.hr}") //$NON-NLS-1$
+    private String mailFrom;
+
+    public MimvFormService(As400Repository as400Repository)
+    {
         this.as400Repository = as400Repository;
     }
 
@@ -165,7 +183,7 @@ public class MimvFormService {
         log.info("Computed totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
         as400Repository.updateMimvZaglavljeTotals(oib, formDateInt, sifobr, seqNum, versionNum, totalNew, totalUsed);
 
-        // 8. Fetch the just-inserted detail rows and selected taxpayer types for the response
+        // 8. Fetch the just-inserted detail rows and selected taxpa/**/yer types for the response
         List<MimvDetaljItem> detalji = as400Repository.fetchMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
         log.info("Fetched {} MIMV_DETALJ rows for response", detalji.size()); //$NON-NLS-1$
 
@@ -339,13 +357,157 @@ public class MimvFormService {
     }
 
     // -------------------------------------------------------------------------
+    // Form confirm — POST /mimv/form/confirm
+    // -------------------------------------------------------------------------
+
+    /**
+     * Validates the form data, generates an ET405AA XML document, and sends it as an email attachment
+     * to the destinationEmail specified in the zaglavlje.
+     * Throws {@link IllegalArgumentException} listing all missing fields when validation fails.
+     *
+     * @param mandatorId mandator identifier from request header
+     * @param companyId  company identifier from request header
+     * @param request    same payload as POST /mimv/form/build/update
+     * @return the destination email address to which the XML was sent
+     */
+    public String confirmForm(String mandatorId, String companyId, FormUpdateRequest request)
+    {
+        FormUpdateData      data    = request.getData();
+        ZaglavljeUpdateData z       = data != null ? data.getZaglavlje() : null;
+        List<MimvDetaljItem> detalji = data != null ? data.getDetalji() : null;
+
+        List<String> zaglavljeErrors = collectZaglavljeErrors(z, data);
+        List<String> detaljiErrors   = collectDetaljiErrors(detalji);
+
+        if (!zaglavljeErrors.isEmpty() || !detaljiErrors.isEmpty())
+        {
+            StringBuilder msg = new StringBuilder();
+            if (!zaglavljeErrors.isEmpty())
+            {
+                msg.append("U zaglavlju nedostaje: ").append(String.join(", ", zaglavljeErrors)); //$NON-NLS-1$
+            }
+            if (!detaljiErrors.isEmpty())
+            {
+                if (msg.length() > 0)
+                {
+                    msg.append("; "); //$NON-NLS-1$
+                }
+                msg.append("U detaljima na nekim vozilima nedostaje: ").append(String.join(", ", detaljiErrors)); //$NON-NLS-1$
+            }
+            log.warn("confirmForm validation failed: {}", msg); //$NON-NLS-1$
+            throw new IllegalArgumentException(msg.toString());
+        }
+
+        if (mailSender == null)
+        {
+            log.error("Mail sender not configured — set MAIL_HOST, MAIL_USERNAME, MAIL_PASSWORD env vars."); //$NON-NLS-1$
+            throw new IllegalStateException("Mail sender not configured."); //$NON-NLS-1$
+        }
+
+        String oib = as400Repository.fetchOib();
+
+        BigDecimal totalNew  = BigDecimal.ZERO;
+        BigDecimal totalUsed = BigDecimal.ZERO;
+        for (MimvDetaljItem item : detalji)
+        {
+            BigDecimal iznos = item.getObracunatiIznosPP() != null ? item.getObracunatiIznosPP() : BigDecimal.ZERO;
+            if ("R".equalsIgnoreCase(item.getStatusVozila())) //$NON-NLS-1$
+            {
+                totalUsed = totalUsed.add(iznos);
+            }
+            else
+            {
+                totalNew = totalNew.add(iznos);
+            }
+        }
+        log.info("confirmForm totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
+
+        String xmlContent = MimvXmlBuilder.build(oib, data, totalNew, totalUsed);
+
+        String sifobr   = "MV03".equalsIgnoreCase(data.getTaxPayerCode()) ? "405" : "401"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        String filename = "ET405AA_" + sifobr + ".xml"; //$NON-NLS-1$ //$NON-NLS-2$
+        String email    = z.getDestinationEmail();
+
+        sendXmlEmail(email, xmlContent, filename, z);
+
+        log.info("confirmForm: XML sent to {}", email); //$NON-NLS-1$
+        return email;
+    }
+
+    private List<String> collectZaglavljeErrors(ZaglavljeUpdateData z, FormUpdateData data)
+    {
+        List<String> errors = new ArrayList<>();
+        if (isBlank(z != null ? z.getDestinationEmail()    : null)) errors.add("email adresa"); //$NON-NLS-1$
+        if (isBlank(z != null ? z.getTaxOfficeCode()       : null)) errors.add("šifra carinskog ureda"); //$NON-NLS-1$
+        if (isBlank(z != null ? z.getTaxOfficeDescription(): null)) errors.add("opis carinskog ureda"); //$NON-NLS-1$
+        if (isBlank(z != null ? z.getCompanyDescription()  : null)) errors.add("naziv obveznika"); //$NON-NLS-1$
+        if (isBlank(z != null ? z.getCompanySeat()         : null)) errors.add("sjedište obveznika"); //$NON-NLS-1$
+        if (isBlank(data != null ? data.getTaxPayerCode()  : null)) errors.add("vrsta obveznika (taxPayerCode)"); //$NON-NLS-1$
+        if (z == null || z.getDateFrom() == null)                    errors.add("datum od (dateFrom)"); //$NON-NLS-1$
+        if (z == null || z.getDateTo()   == null)                    errors.add("datum do (dateTo)"); //$NON-NLS-1$
+        return errors;
+    }
+
+    private List<String> collectDetaljiErrors(List<MimvDetaljItem> detalji)
+    {
+        if (detalji == null || detalji.isEmpty())
+        {
+            return List.of("lista vozila je prazna"); //$NON-NLS-1$
+        }
+        Set<String> missing = new LinkedHashSet<>();
+        for (MimvDetaljItem item : detalji)
+        {
+            if (item.getObracunatiIznosPP()    == null)                          missing.add("obračunati iznos PP"); //$NON-NLS-1$
+            if (item.getDatumIzdavanjaRacuna() == null || item.getDatumIzdavanjaRacuna() == 0) missing.add("datum izdavanja računa"); //$NON-NLS-1$
+            if (isBlank(item.getBrojRacuna()))                                   missing.add("broj računa"); //$NON-NLS-1$
+            if (isBlank(item.getOib()))                                          missing.add("OIB kupca"); //$NON-NLS-1$
+            if (isBlank(item.getPorezniObveznik()))                              missing.add("porezni obveznik"); //$NON-NLS-1$
+            if (item.getProdajnaCijena()        == null)                         missing.add("prodajna cijena"); //$NON-NLS-1$
+            if (item.getProsjEmisijaCO2()       == null)                         missing.add("prosječna emisija CO2"); //$NON-NLS-1$
+            if (isBlank(item.getVinOznaka()))                                    missing.add("VIN oznaka"); //$NON-NLS-1$
+            if (isBlank(item.getMarkaVozila()))                                  missing.add("marka vozila"); //$NON-NLS-1$
+        }
+        return new ArrayList<>(missing);
+    }
+
+    private void sendXmlEmail(String toEmail, String xmlContent, String filename, ZaglavljeUpdateData z)
+    {
+        try
+        {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8"); //$NON-NLS-1$
+            helper.setFrom(mailFrom);
+            helper.setTo(toEmail);
+            String dateRange = (z.getDateFrom() != null ? z.getDateFrom().toString() : "") //$NON-NLS-1$
+                    + " / " //$NON-NLS-1$
+                    + (z.getDateTo() != null ? z.getDateTo().toString() : ""); //$NON-NLS-1$
+            helper.setSubject("MI-MV Obrazac - " + dateRange); //$NON-NLS-1$
+            helper.setText("U prilogu se nalazi MI-MV obrazac u XML formatu."); //$NON-NLS-1$
+            helper.addAttachment(filename, new ByteArrayResource(xmlContent.getBytes(StandardCharsets.UTF_8)));
+            mailSender.send(message);
+        }
+        catch (Exception e)
+        {
+            log.error("Failed to send XML email to {}: {}", toEmail, e.getMessage(), e); //$NON-NLS-1$
+            throw new RuntimeException("Slanje emaila nije uspjelo: " + e.getMessage(), e); //$NON-NLS-1$
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
 
-    private static String toSifobr(String taxPayerCode) {
-        if (taxPayerCode == null) {
+    private static String toSifobr(String taxPayerCode)
+    {
+        if (taxPayerCode == null)
+        {
             return null;
         }
         return SIFOBR_BY_TAX_CODE.get(taxPayerCode.toUpperCase());
+    }
+
+    private static boolean isBlank(String s)
+    {
+        return s == null || s.isBlank();
     }
 }
