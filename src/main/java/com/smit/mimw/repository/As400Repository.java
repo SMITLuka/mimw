@@ -6,10 +6,12 @@ import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
 import com.smit.mimw.dto.TaxOffice;
+import com.smit.mimw.tenant.TenantContext;
+import com.smit.mimw.tenant.TenantSettings;
+import com.smit.mimw.tenant.TenantSettingsProvider;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -18,6 +20,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -29,6 +33,10 @@ import java.util.stream.Stream;
  *
  * MIMV_ZAGLAVLJE and MIMV_DETALJ are local Pantheon MSSQL tables.
  * AS400 HF tables (hfs, hfk, hfb, etc.) are accessed via linked server.
+ *
+ * Every request works on the company in {@link TenantContext}: the JdbcTemplate's DataSource routes
+ * to that company's SQL Server, and the AS400 linked server, catalog and libraries come from that
+ * company's settings (Integration Hub or env variables).
  */
 @Repository
 public class As400Repository {
@@ -42,74 +50,68 @@ public class As400Repository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    /**
-     * Linked server name — set via env var AS400_LINKED_SERVER,
-     * or auto-read from _cdp_param.aclinkserver at startup.
-     */
-    @Value("${as400.linked-server:}")
-    private String linkedServer;
+    private final TenantSettingsProvider settingsProvider;
 
-    /** AS400 catalog/database name — default ADRIAVC1. */
-    @Value("${as400.catalog:ADRIAVC1}")
-    private String catalog;
+    /** Linked server names read from _cdp_param, per database (pool key), when the settings do not name one. */
+    private final Map<String, String> linkedServerByDatabase = new ConcurrentHashMap<>();
 
-    /** AS400 data group prefix (e.g. KB0). Used together with branch to compute hfLibrary. */
-    @Value("${as400.data-group:}")
-    private String dataGroup;
-
-    /** AS400 branch number (e.g. 1). Used together with dataGroup to compute hfLibrary. */
-    @Value("${as400.branch:1}")
-    private String branch;
-
-    /** HF tables library — computed from dataGroup and branch in init(). e.g. KB0D1K */
-    private String hfLibrary;
-
-    /** Main data library — computed from dataGroup and branch in init(). e.g. KB0D1 */
-    private String mainLibrary;
-
-    /** P library — computed from dataGroup and branch in init(). e.g. KB0DP */
-    private String pLibrary;
-
-    public As400Repository(JdbcTemplate jdbcTemplate) {
+    public As400Repository(JdbcTemplate jdbcTemplate, TenantSettingsProvider settingsProvider) {
         this.jdbcTemplate = jdbcTemplate;
+        this.settingsProvider = settingsProvider;
+    }
+
+    @PostConstruct
+    public void init() {
+        if (settingsProvider.isHubEnabled()) {
+            log.info("AS400 settings are resolved per company from Integration Hub"); //$NON-NLS-1$
+        } else {
+            TenantSettings env = settingsProvider.fromEnvironment();
+            if (env.hfLibrary() == null) {
+                log.warn("as400.data-group is not set. AS400 libraries cannot be computed — MIMV_DETALJ inserts will fail."); //$NON-NLS-1$
+            } else {
+                log.info("Computed libraries: main='{}', hf='{}', p='{}' (dataGroup='{}', branch='{}')", //$NON-NLS-1$
+                        env.mainLibrary(), env.hfLibrary(), env.pLibrary(), env.dataGroup(), env.branch());
+            }
+        }
+    }
+
+    /** Settings of the company being served (environment settings outside a request in environment mode). */
+    private TenantSettings settings() {
+        TenantSettings current = TenantContext.get();
+        if (current != null) {
+            return current;
+        }
+        if (!settingsProvider.isHubEnabled()) {
+            return settingsProvider.fromEnvironment();
+        }
+        throw new IllegalStateException("Nema mandatorId/companyId headera — ne znam za koju firmu se radi"); //$NON-NLS-1$
     }
 
     /**
-     * Resolves linked server name and computes the HF library name.
-     * If linkedServer was not provided via env var, auto-reads it from _cdp_param.
-     * hfLibrary is derived from dataGroup + branch: (dataGroup + "D" + branch).substring(0,4) + "1K"
-     * — e.g. dataGroup=KB0, branch=1 → KB0D1K.
+     * Linked server name: from the company's settings (AS400_LINKED_SERVER), otherwise read once per
+     * database from _cdp_param.aclinkserver and remembered.
      */
-    @PostConstruct
-    public void init() {
-        if (linkedServer == null || linkedServer.isBlank()) {
-            try {
-                String ls = jdbcTemplate.queryForObject(
-                        "SELECT TOP 1 aclinkserver FROM _cdp_param", String.class); //$NON-NLS-1$
-                if (ls != null && !ls.isBlank()) {
-                    linkedServer = ls.trim();
-                    log.info("Loaded linked server name from _cdp_param: '{}'", linkedServer); //$NON-NLS-1$
-                } else {
-                    log.error("_cdp_param.aclinkserver is empty. Set env var AS400_LINKED_SERVER or populate _cdp_param."); //$NON-NLS-1$
-                }
-            } catch (Exception e) {
-                log.error("Could not read linked server from _cdp_param ({}). Set env var AS400_LINKED_SERVER.", e.getMessage()); //$NON-NLS-1$
+    private String linkedServer() {
+        TenantSettings s = settings();
+        if (s.linkedServer() != null && !s.linkedServer().isBlank()) {
+            return s.linkedServer().trim();
+        }
+        String cached = linkedServerByDatabase.get(s.poolKey());
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            String ls = jdbcTemplate.queryForObject("SELECT TOP 1 aclinkserver FROM _cdp_param", String.class); //$NON-NLS-1$
+            if (ls != null && !ls.isBlank()) {
+                linkedServerByDatabase.put(s.poolKey(), ls.trim());
+                log.info("Loaded linked server name from _cdp_param: '{}' ({})", ls.trim(), s.source()); //$NON-NLS-1$
+                return ls.trim();
             }
-        } else {
-            log.info("Using linked server from env var: '{}'", linkedServer); //$NON-NLS-1$
+            log.error("_cdp_param.aclinkserver is empty ({}). Set AS400_LINKED_SERVER.", s.source()); //$NON-NLS-1$
+        } catch (Exception e) {
+            log.error("Could not read linked server from _cdp_param ({}): {}. Set AS400_LINKED_SERVER.", s.source(), e.getMessage()); //$NON-NLS-1$
         }
-
-        if (dataGroup != null && !dataGroup.isBlank()) {
-            String br = branch != null ? branch : "1"; //$NON-NLS-1$
-            String cdpLib = dataGroup + "D" + br; //$NON-NLS-1$
-            String prefix = cdpLib.substring(0, Math.min(4, cdpLib.length()));
-            mainLibrary = cdpLib;
-            hfLibrary   = prefix + "1K"; //$NON-NLS-1$
-            pLibrary    = prefix + "P"; //$NON-NLS-1$
-            log.info("Computed libraries: main='{}', hf='{}', p='{}' (dataGroup='{}', branch='{}')", mainLibrary, hfLibrary, pLibrary, dataGroup, br); //$NON-NLS-1$
-        } else {
-            log.warn("as400.data-group is not set. AS400 libraries cannot be computed — MIMV_DETALJ inserts will fail."); //$NON-NLS-1$
-        }
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -121,10 +123,11 @@ public class As400Repository {
      * Format: [linkedServer].[catalog].[library].[table]
      */
     private String as400Table(String library, String table) {
+        String linkedServer = linkedServer();
         if (linkedServer == null || linkedServer.isBlank()) {
             return library + "." + table; //$NON-NLS-1$
         }
-        return "[" + linkedServer + "].[" + catalog + "].[" + library + "].[" + table + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
+        return "[" + linkedServer + "].[" + settings().catalog() + "].[" + library + "].[" + table + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
     }
 
     // -------------------------------------------------------------------------
@@ -465,6 +468,8 @@ public class As400Repository {
     public void insertMimvDetalj(String mandatorId, String oib, int formDate, String sifobr,
                                   int seqNum, int versionNum,
                                   String dateFrom, String dateTo, String companyId) {
+        String linkedServer = linkedServer();
+        String hfLibrary = settings().hfLibrary();
         if (linkedServer == null || linkedServer.isBlank()) {
             throw new IllegalStateException("AS400 linked server is required for MIMV_DETALJ insert. " //$NON-NLS-1$
                     + "Configure AS400_LINKED_SERVER or _cdp_param.aclinkserver."); //$NON-NLS-1$
@@ -706,11 +711,13 @@ public class As400Repository {
             }
             String sql = sb.toString();
 
+            TenantSettings s = settings();
+            String linkedServer = linkedServer();
             sql = sql.replace("<LINKEDSERVER>",  linkedServer != null ? linkedServer : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<CATALOG>",       catalog != null ? catalog : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<MAINLIBRARY>",   mainLibrary != null ? mainLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<PLIBRARY>",      pLibrary != null ? pLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<HFLIBRARY>",     hfLibrary != null ? hfLibrary : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<CATALOG>",       s.catalog() != null ? s.catalog() : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<MAINLIBRARY>",   s.mainLibrary() != null ? s.mainLibrary() : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<PLIBRARY>",      s.pLibrary() != null ? s.pLibrary() : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<HFLIBRARY>",     s.hfLibrary() != null ? s.hfLibrary() : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<SIFPOD>",       mandatorId != null ? mandatorId : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<OIB>",          oib != null ? oib : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<DATUM>",        String.valueOf(formDate)); //$NON-NLS-1$

@@ -52,6 +52,24 @@ as400:
   data-group: ${AS400_DATA_GROUP:}
   branch: ${AS400_BRANCH:1}
 
+# --- Integration Hub ---
+# When INTEGRATION_HUB_URL is set, each company's SQL Server connection and AS400 settings are read from
+# Integration Hub (GET /service/configuration) using the mandatorId/companyId headers Ares sends.
+# The keys in Hub's "MIMW integration" configuration have the same names as the env variables above
+# (SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD, AS400_DATA_GROUP, AS400_BRANCH, ...).
+# When it is empty, MIMW serves one company with the env variables above (previous behaviour).
+integration-hub:
+  url: ${INTEGRATION_HUB_URL:}
+  api-key: ${INTEGRATION_HUB_API_KEY:}
+  interface-name: ${INTEGRATION_HUB_INTERFACE:MIMW integration}
+  cache-seconds: ${INTEGRATION_HUB_CACHE_SECONDS:300}
+
+# The datasource depends on the company of the request, so there is no single database to health-check.
+management:
+  health:
+    db:
+      enabled: false
+
 server:
   port: ${PORT:8081}
 

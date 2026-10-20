@@ -1,5 +1,7 @@
 package com.smit.mimw.exception;
 
+import com.smit.mimw.tenant.TenantConfigurationException;
+
 import com.smit.mimw.dto.ApiResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +46,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(message));
+    }
+
+    @ExceptionHandler(TenantConfigurationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTenantConfiguration(TenantConfigurationException ex) {
+        log.error("Company configuration error: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(ex.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)
