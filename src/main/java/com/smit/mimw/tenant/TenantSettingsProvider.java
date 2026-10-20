@@ -85,8 +85,8 @@ public class TenantSettingsProvider {
 
         String url = value(config, additional, "SPRING_DATASOURCE_URL"); //$NON-NLS-1$
         if (url == null) {
-            throw new TenantConfigurationException("U Integration Hubu za " + key //$NON-NLS-1$
-                    + " nije upisan SPRING_DATASOURCE_URL u konfiguraciji '" + hub.interfaceName() + "'"); //$NON-NLS-1$ //$NON-NLS-2$
+            throw new TenantConfigurationException("U Integration Hubu za mandator '" + key.mandatorId() + "' / firmu '" //$NON-NLS-1$ //$NON-NLS-2$
+                    + key.companyId() + "' nije upisan SPRING_DATASOURCE_URL u konfiguraciji '" + hub.interfaceName() + "'."); //$NON-NLS-1$ //$NON-NLS-2$
         }
         return new TenantSettings(
                 "hub:" + key, //$NON-NLS-1$

@@ -59,8 +59,7 @@ public class IntegrationHubClient {
             HttpStatusCode status = e.getStatusCode();
             String body = e.getResponseBodyAsString();
             if (status.value() == 404) {
-                throw new TenantConfigurationException("Integration Hub nema konfiguraciju '" + interfaceName + "' za mandator " //$NON-NLS-1$ //$NON-NLS-2$
-                        + key.mandatorId() + " / company " + key.companyId() + ": " + body, e); //$NON-NLS-1$ //$NON-NLS-2$
+                throw new TenantConfigurationException(notFoundMessage(key, body), e);
             }
             if (status.value() == 401 || status.value() == 403) {
                 throw new TenantConfigurationException("Integration Hub odbio je API ključ (HTTP " + status.value() //$NON-NLS-1$
@@ -70,6 +69,28 @@ public class IntegrationHubClient {
         } catch (RestClientException e) {
             throw new TenantConfigurationException("Integration Hub nije dostupan: " + e.getMessage(), e); //$NON-NLS-1$
         }
+    }
+
+    /** Turns Hub's 404 error code into a message an Ares user can act on. */
+    private String notFoundMessage(TenantKey key, String body) {
+        String b = body == null ? "" : body; //$NON-NLS-1$
+        if (b.contains("MANDATOR_NOT_FOUND")) { //$NON-NLS-1$
+            return "U Integration Hubu ne postoji mandator s oznakom '" + key.mandatorId() //$NON-NLS-1$
+                    + "'. Upišite tu oznaku u polje Mandator ID odgovarajućeg mandatora."; //$NON-NLS-1$
+        }
+        if (b.contains("COMPANY_NOT_FOUND")) { //$NON-NLS-1$
+            return "U Integration Hubu mandator '" + key.mandatorId() + "' nema firmu s oznakom '" + key.companyId() //$NON-NLS-1$ //$NON-NLS-2$
+                    + "'. Dodajte firmu ili joj upišite tu oznaku u polje Company ID."; //$NON-NLS-1$
+        }
+        if (b.contains("INTERFACE_NOT_FOUND")) { //$NON-NLS-1$
+            return "U Integration Hubu ne postoji sučelje '" + interfaceName + "'."; //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        if (b.contains("CONFIGURATION_NOT_FOUND")) { //$NON-NLS-1$
+            return "Firma '" + key.companyId() + "' (mandator '" + key.mandatorId() + "') u Integration Hubu nema konfiguraciju '" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                    + interfaceName + "'. Dodajte je pod Configurations te firme."; //$NON-NLS-1$
+        }
+        return "Integration Hub ne može pronaći postavke za mandator '" + key.mandatorId() + "' / firmu '" //$NON-NLS-1$ //$NON-NLS-2$
+                + key.companyId() + "': " + b; //$NON-NLS-1$
     }
 
     private static String stripTrailingSlash(String url) {
