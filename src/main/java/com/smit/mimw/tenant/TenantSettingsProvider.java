@@ -28,7 +28,6 @@ public class TenantSettingsProvider {
 
     static final String DEFAULT_DRIVER = "com.microsoft.sqlserver.jdbc.SQLServerDriver"; //$NON-NLS-1$
     static final String DEFAULT_CATALOG = "ADRIAVC1"; //$NON-NLS-1$
-    static final String DEFAULT_BRANCH = "1"; //$NON-NLS-1$
 
     private final IntegrationHubClient hubClient;
     private final TenantSettings environmentSettings;
@@ -97,7 +96,7 @@ public class TenantSettingsProvider {
                 value(config, additional, "AS400_LINKED_SERVER"), //$NON-NLS-1$
                 orDefault(value(config, additional, "AS400_CATALOG"), DEFAULT_CATALOG), //$NON-NLS-1$
                 value(config, additional, "AS400_DATA_GROUP"), //$NON-NLS-1$
-                orDefault(value(config, additional, "AS400_BRANCH"), DEFAULT_BRANCH)); //$NON-NLS-1$
+                value(config, additional, "AS400_BRANCH")); //$NON-NLS-1$
     }
 
     /** Interface configuration first, then the company's Additional Data; blank counts as not set. */

@@ -6,6 +6,7 @@ import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
 import com.smit.mimw.dto.TaxOffice;
+import com.smit.mimw.tenant.TenantConfigurationException;
 import com.smit.mimw.tenant.TenantContext;
 import com.smit.mimw.tenant.TenantSettings;
 import com.smit.mimw.tenant.TenantSettingsProvider;
@@ -122,6 +123,16 @@ public class As400Repository {
      * Builds the fully qualified four-part table name for AS400 via linked server.
      * Format: [linkedServer].[catalog].[library].[table]
      */
+    /** Main data library of the request's company (AS400_DATA_GROUP + "D1", e.g. KB0D1). */
+    private String mainLibrary() {
+        String lib = settings().mainLibrary();
+        if (lib == null) {
+            throw new TenantConfigurationException("AS400_DATA_GROUP nije upisan (" + settings().source() //$NON-NLS-1$
+                    + ") - ne znam iz koje AS400 knjiznice citati (npr. KB0 -> KB0D1)."); //$NON-NLS-1$
+        }
+        return lib;
+    }
+
     private String as400Table(String library, String table) {
         String linkedServer = linkedServer();
         if (linkedServer == null || linkedServer.isBlank()) {
@@ -167,44 +178,44 @@ public class As400Repository {
     }
 
     // -------------------------------------------------------------------------
-    // OIB — AS400 KB0D1.HDB
+    // OIB — AS400 <data group>D1.HDB (e.g. KB0D1.HDB)
     // -------------------------------------------------------------------------
 
     /**
-     * Fetches the taxpayer OIB from KB0D1.HDB.
+     * Fetches the taxpayer OIB from <data group>D1.HDB (e.g. KB0D1.HDB).
      * OIB occupies bytes 324-334 (length 11) inside the HDBINHALT packed field.
      * Uses SUBSTRING (T-SQL) since the query goes through the linked server.
      */
     public String fetchOib() {
         String sql = "SELECT TRIM(SUBSTRING(HDBINHALT, 324, 11)) AS OIB FROM " //$NON-NLS-1$
-                + as400Table("KB0D1", "HDB") + " WHERE HDBSART = 'BEN'"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                + as400Table(mainLibrary(), "HDB") + " WHERE HDBSART = 'BEN'"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         log.debug("fetchOib SQL: {}", sql); //$NON-NLS-1$
         try {
             List<String> results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("OIB")); //$NON-NLS-1$
             if (results.isEmpty()) {
-                log.warn("No BEN record found in KB0D1.HDB"); //$NON-NLS-1$
+                log.warn("No BEN record found in HDB ({})", mainLibrary()); //$NON-NLS-1$
                 return null;
             }
             String oib = results.get(0);
             return oib != null ? oib.trim() : null;
         } catch (Exception e) {
-            log.warn("Could not fetch OIB from KB0D1.HDB: {}", e.getMessage()); //$NON-NLS-1$
+            log.warn("Could not fetch OIB from {}.HDB: {}", mainLibrary(), e.getMessage()); //$NON-NLS-1$
             return null;
         }
     }
 
     // -------------------------------------------------------------------------
-    // Company data — AS400 KB0D1.ZBEN1
+    // Company data — AS400 <data group>D1.ZBEN1 (e.g. KB0D1.ZBEN1)
     // -------------------------------------------------------------------------
 
     /**
-     * Fetches company name and address from KB0D1.ZBEN1.
+     * Fetches company name and address from <data group>D1.ZBEN1 (e.g. KB0D1.ZBEN1).
      * Returns empty strings on failure rather than propagating the exception,
      * so the form-build flow is not blocked when the table is temporarily unavailable.
      */
     public CompanyData fetchCompanyData() {
         String sql = "SELECT TOP 1 BENNAME1, BENNAME2, BENSTR, BENPLZ, BENORT FROM " //$NON-NLS-1$
-                + as400Table("KB0D1", "ZBEN1"); //$NON-NLS-1$ //$NON-NLS-2$
+                + as400Table(mainLibrary(), "ZBEN1"); //$NON-NLS-1$ //$NON-NLS-2$
         log.debug("fetchCompanyData SQL: {}", sql); //$NON-NLS-1$
         try {
             return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
@@ -225,7 +236,7 @@ public class As400Repository {
                         .build();
             });
         } catch (Exception e) {
-            log.warn("Could not fetch company data from KB0D1.ZBEN1: {}", e.getMessage()); //$NON-NLS-1$
+            log.warn("Could not fetch company data from {}.ZBEN1: {}", mainLibrary(), e.getMessage()); //$NON-NLS-1$
             return CompanyData.builder().companyDescription("").companySeat("").build(); //$NON-NLS-1$ //$NON-NLS-2$
         }
     }
@@ -467,7 +478,7 @@ public class As400Repository {
      */
     public void insertMimvDetalj(String mandatorId, String oib, int formDate, String sifobr,
                                   int seqNum, int versionNum,
-                                  String dateFrom, String dateTo, String companyId) {
+                                  String dateFrom, String dateTo) {
         String linkedServer = linkedServer();
         String hfLibrary = settings().hfLibrary();
         if (linkedServer == null || linkedServer.isBlank()) {
@@ -476,12 +487,12 @@ public class As400Repository {
         }
         if (hfLibrary == null || hfLibrary.isBlank()) {
             throw new IllegalStateException("AS400 HF library is required for MIMV_DETALJ insert. " //$NON-NLS-1$
-                    + "Configure AS400_DATA_GROUP (and optionally AS400_BRANCH)."); //$NON-NLS-1$
+                    + "Configure AS400_DATA_GROUP (e.g. KB0)."); //$NON-NLS-1$
         }
 
         // Step 1: execute T-SQL with 4-part linked server names directly — no EXEC AT, no DTC
         String tsql = loadDetaljSelectSql(mandatorId, oib, formDate, sifobr,
-                seqNum, versionNum, dateFrom, dateTo, companyId);
+                seqNum, versionNum, dateFrom, dateTo);
 
         List<Object[]> rows = jdbcTemplate.query(tsql, (rs, rowNum) -> {
             Object[] row = new Object[30];
@@ -697,7 +708,9 @@ public class As400Repository {
      */
     private String loadDetaljSelectSql(String mandatorId, String oib, int formDate, String sifobr,
                                         int seqNum, int versionNum,
-                                        String dateFrom, String dateTo, String companyId) {
+                                        String dateFrom, String dateTo) {
+        // Outside the try: a wrong AS400_BRANCH must reach the user as a configuration error (503 with message)
+        Integer branch = settings().branchFilter();
         try {
             byte[] bytes = getClass().getClassLoader()
                     .getResourceAsStream("sql/insert_mimv_detalj.sql").readAllBytes(); //$NON-NLS-1$
@@ -726,7 +739,11 @@ public class As400Repository {
             sql = sql.replace("<RBRPROM>",      String.valueOf(versionNum)); //$NON-NLS-1$
             sql = sql.replace("<ODDATUMA>",     dateFrom != null ? dateFrom : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<DODATUMA>",     dateTo != null ? dateTo : ""); //$NON-NLS-1$ //$NON-NLS-2$
-            sql = sql.replace("<BRANCH>",       companyId != null ? companyId : ""); //$NON-NLS-1$ //$NON-NLS-2$
+            sql = sql.replace("<BRANCHFILTER>", branch != null //$NON-NLS-1$
+                    ? "AND CASE WHEN t1.AENBET > 0 THEN t1.AENBET ELSE t1.ANLBET END = " + branch //$NON-NLS-1$
+                    : ""); //$NON-NLS-1$
+            log.info("MIMV_DETALJ vehicles: data group {}, branch {}", s.dataGroup(), //$NON-NLS-1$
+                    branch != null ? branch : "all"); //$NON-NLS-1$
 
             return sql.trim();
         } catch (Exception e) {
