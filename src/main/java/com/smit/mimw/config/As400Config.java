@@ -58,7 +58,7 @@ public class As400Config implements WebMvcConfigurer {
     @Value("${as400.data-group:}")
     private String dataGroup;
 
-    @Value("${as400.branch:1}")
+    @Value("${as400.branch:}")
     private String branch;
 
     @Value("${integration-hub.url:}")

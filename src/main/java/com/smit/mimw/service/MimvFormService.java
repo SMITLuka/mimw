@@ -174,7 +174,7 @@ public class MimvFormService {
 
         // 6. Insert MIMV_DETALJ from AS400 HF tables — FK satisfied by step 5
         as400Repository.insertMimvDetalj(mandatorId, oib, formDateInt, sifobr,
-                seqNum, versionNum, dateFrom, dateTo, companyId);
+                seqNum, versionNum, dateFrom, dateTo);
 
         // 7. Compute totals from inserted detail rows and update header
         BigDecimal[] totals = as400Repository.sumMimvDetaljTotals(oib, formDateInt, sifobr, seqNum, versionNum);

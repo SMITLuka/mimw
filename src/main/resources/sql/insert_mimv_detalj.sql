@@ -27,7 +27,7 @@
 --   <RBRPROM>       RedniBrojPPPromjena         (e.g. 0)
 --   <ODDATUMA>      Period start YYYYMMDD       (dateFrom)
 --   <DODATUMA>      Period end   YYYYMMDD       (dateTo)
---   <BRANCH>        Company branch number       (companyId)
+--   <BRANCHFILTER>  Branch condition from AS400_BRANCH, or empty (all branches of the data group)
 -- ============================================================
 -- Column order matches MIMV_DETALJ:
 --   OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM,
@@ -106,7 +106,7 @@ WITH vehs AS (
             OR
             (hfs.HFSFZGART IN ('A', 'G') AND EXISTS (SELECT 1 FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE MV03_TRGOVAC_RABLJENIM = 1))
         )
-        AND CASE WHEN t1.AENBET > 0 THEN t1.AENBET ELSE t1.ANLBET END = <BRANCH>
+        <BRANCHFILTER>
 )
 SELECT
     '<OIB>'                                                                                         AS OIB_OBVEZNIKA,

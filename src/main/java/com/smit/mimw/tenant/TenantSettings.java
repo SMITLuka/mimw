@@ -21,19 +21,38 @@ public record TenantSettings(
         String dataGroup,
         String branch) {
 
-    /** Main data library, e.g. KB0D1 (dataGroup + "D" + branch). Null when dataGroup is not set. */
+    // AS400 library names are the data group (AS400_DATA_GROUP, e.g. KB0) followed by a fixed suffix.
+    // They do not depend on AS400_BRANCH: all branches of a data group share the same libraries.
+
+    /** Main data library, e.g. KB0D1. Null when dataGroup is not set. */
     public String mainLibrary() {
-        return hasDataGroup() ? dataGroup + "D" + branchOrDefault() : null; //$NON-NLS-1$
+        return hasDataGroup() ? dataGroup.trim() + "D1" : null; //$NON-NLS-1$
     }
 
     /** HF tables library, e.g. KB0D1K. Null when dataGroup is not set. */
     public String hfLibrary() {
-        return hasDataGroup() ? prefix() + "1K" : null; //$NON-NLS-1$
+        return hasDataGroup() ? dataGroup.trim() + "D1K" : null; //$NON-NLS-1$
     }
 
     /** P library, e.g. KB0DP. Null when dataGroup is not set. */
     public String pLibrary() {
-        return hasDataGroup() ? prefix() + "P" : null; //$NON-NLS-1$
+        return hasDataGroup() ? dataGroup.trim() + "DP" : null; //$NON-NLS-1$
+    }
+
+    /**
+     * Branch number the vehicle query is limited to, or null when AS400_BRANCH is not set:
+     * then all branches of the mandator (data group) are included.
+     */
+    public Integer branchFilter() {
+        if (branch == null || branch.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(branch.trim());
+        } catch (NumberFormatException e) {
+            throw new TenantConfigurationException("AS400_BRANCH mora biti broj poslovnice (npr. 1) ili prazan, a upisano je '" //$NON-NLS-1$
+                    + branch.trim() + "' (" + source + ")."); //$NON-NLS-1$ //$NON-NLS-2$
+        }
     }
 
     /** Identifies the connection pool: same URL + user + password share one pool. */
@@ -43,15 +62,6 @@ public record TenantSettings(
 
     private boolean hasDataGroup() {
         return dataGroup != null && !dataGroup.isBlank();
-    }
-
-    private String branchOrDefault() {
-        return branch != null && !branch.isBlank() ? branch.trim() : "1"; //$NON-NLS-1$
-    }
-
-    private String prefix() {
-        String lib = dataGroup.trim() + "D" + branchOrDefault(); //$NON-NLS-1$
-        return lib.substring(0, Math.min(4, lib.length()));
     }
 
     private static String sha256(String value) {
