@@ -1,5 +1,6 @@
 package com.smit.mimw.config;
 
+import com.smit.mimw.tenant.As400DirectPools;
 import com.smit.mimw.tenant.IntegrationHubClient;
 import com.smit.mimw.tenant.RoutingDataSource;
 import com.smit.mimw.tenant.TenantInterceptor;
@@ -61,6 +62,15 @@ public class As400Config implements WebMvcConfigurer {
     @Value("${as400.branch:}")
     private String branch;
 
+    @Value("${as400.host:}")
+    private String as400Host;
+
+    @Value("${as400.user:}")
+    private String as400User;
+
+    @Value("${as400.password:}")
+    private String as400Password;
+
     @Value("${integration-hub.url:}")
     private String hubUrl;
 
@@ -76,7 +86,7 @@ public class As400Config implements WebMvcConfigurer {
     @Bean
     public TenantSettingsProvider tenantSettingsProvider() {
         TenantSettings env = new TenantSettings("environment", url, username, password, driverClassName, //$NON-NLS-1$
-                linkedServer, catalog, dataGroup, branch);
+                linkedServer, catalog, dataGroup, branch, as400Host, as400User, as400Password);
 
         IntegrationHubClient hubClient = null;
         if (hubUrl != null && !hubUrl.isBlank()) {
@@ -89,6 +99,12 @@ public class As400Config implements WebMvcConfigurer {
             log.info("Company settings: ENVIRONMENT mode (INTEGRATION_HUB_URL not set) → {}", env); //$NON-NLS-1$
         }
         return new TenantSettingsProvider(hubClient, env, Duration.ofSeconds(hubCacheSeconds));
+    }
+
+    /** Direct AS400 (JT400) connections for companies with AS400_HOST set. */
+    @Bean(destroyMethod = "close")
+    public As400DirectPools as400DirectPools() {
+        return new As400DirectPools();
     }
 
     @Bean(destroyMethod = "close")

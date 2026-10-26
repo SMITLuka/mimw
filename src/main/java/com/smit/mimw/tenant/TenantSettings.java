@@ -19,7 +19,20 @@ public record TenantSettings(
         String linkedServer,
         String catalog,
         String dataGroup,
-        String branch) {
+        String branch,
+        String as400Host,
+        String as400User,
+        String as400Password) {
+
+    /** true when AS400_HOST is set: AS400 tables are read directly (JT400) instead of through the linked server. */
+    public boolean directAs400() {
+        return as400Host != null && !as400Host.isBlank();
+    }
+
+    /** Identifies the direct AS400 pool: same host + user + password share one pool. */
+    public String as400PoolKey() {
+        return as400Host + "|" + as400User + "|" + sha256(as400Password); //$NON-NLS-1$ //$NON-NLS-2$
+    }
 
     // AS400 library names are the data group (AS400_DATA_GROUP, e.g. KB0) followed by a fixed suffix.
     // They do not depend on AS400_BRANCH: all branches of a data group share the same libraries.
@@ -78,6 +91,6 @@ public record TenantSettings(
     @Override
     public String toString() {
         return "TenantSettings[source=" + source + ", url=" + datasourceUrl + ", user=" + datasourceUsername //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
-                + ", linkedServer=" + linkedServer + ", catalog=" + catalog + ", dataGroup=" + dataGroup + ", branch=" + branch + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
+                + ", linkedServer=" + linkedServer + ", catalog=" + catalog + ", dataGroup=" + dataGroup + ", branch=" + branch + ", as400Host=" + as400Host + ", as400User=" + as400User + "]"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
     }
 }

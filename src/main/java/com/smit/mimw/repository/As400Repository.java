@@ -6,6 +6,7 @@ import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
 import com.smit.mimw.dto.TaxOffice;
+import com.smit.mimw.tenant.As400DirectPools;
 import com.smit.mimw.tenant.TenantConfigurationException;
 import com.smit.mimw.tenant.TenantContext;
 import com.smit.mimw.tenant.TenantSettings;
@@ -53,12 +54,27 @@ public class As400Repository {
 
     private final TenantSettingsProvider settingsProvider;
 
+    private final As400DirectPools as400DirectPools;
+
     /** Linked server names read from _cdp_param, per database (pool key), when the settings do not name one. */
     private final Map<String, String> linkedServerByDatabase = new ConcurrentHashMap<>();
 
-    public As400Repository(JdbcTemplate jdbcTemplate, TenantSettingsProvider settingsProvider) {
+    public As400Repository(JdbcTemplate jdbcTemplate, TenantSettingsProvider settingsProvider,
+                           As400DirectPools as400DirectPools) {
         this.jdbcTemplate = jdbcTemplate;
         this.settingsProvider = settingsProvider;
+        this.as400DirectPools = as400DirectPools;
+    }
+
+    /** true when the company has AS400_HOST: AS400 tables are read directly (JT400), not via the linked server. */
+    private boolean direct() {
+        return settings().directAs400();
+    }
+
+    /** JdbcTemplate for AS400 reads: direct AS400 connection, or the company's SQL Server (linked server). */
+    private JdbcTemplate as400() {
+        TenantSettings s = settings();
+        return s.directAs400() ? as400DirectPools.template(s) : jdbcTemplate;
     }
 
     @PostConstruct
@@ -134,6 +150,9 @@ public class As400Repository {
     }
 
     private String as400Table(String library, String table) {
+        if (direct()) {
+            return library + "." + table; //$NON-NLS-1$
+        }
         String linkedServer = linkedServer();
         if (linkedServer == null || linkedServer.isBlank()) {
             return library + "." + table; //$NON-NLS-1$
@@ -151,7 +170,7 @@ public class As400Repository {
     public List<TaxOffice> fetchTaxOffices() {
         String sql = "SELECT CIYTAA, CIL7AQ FROM " + as400Table("IVASXT", "KLCICPP"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         log.debug("fetchTaxOffices SQL: {}", sql); //$NON-NLS-1$
-        return jdbcTemplate.query(sql, (rs, rowNum) ->
+        return as400().query(sql, (rs, rowNum) ->
                 TaxOffice.builder()
                         .code(trim(rs.getString("CIYTAA"))) //$NON-NLS-1$
                         .description(trim(rs.getString("CIL7AQ"))) //$NON-NLS-1$
@@ -169,7 +188,7 @@ public class As400Repository {
     public List<Brand> fetchBrands() {
         String sql = "SELECT CHYSAA, CHL6AQ FROM " + as400Table("IVASXT", "KLCHCPP"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         log.debug("fetchBrands SQL: {}", sql); //$NON-NLS-1$
-        return jdbcTemplate.query(sql, (rs, rowNum) ->
+        return as400().query(sql, (rs, rowNum) ->
                 Brand.builder()
                         .code(trim(rs.getString("CHYSAA"))) //$NON-NLS-1$
                         .description(trim(rs.getString("CHL6AQ"))) //$NON-NLS-1$
@@ -183,15 +202,15 @@ public class As400Repository {
 
     /**
      * Fetches the taxpayer OIB from <data group>D1.HDB (e.g. KB0D1.HDB).
-     * OIB occupies bytes 324-334 (length 11) inside the HDBINHALT packed field.
+     * OIB occupies bytes 284-294 (length 11) inside the HDBINHALT packed field.
      * Uses SUBSTRING (T-SQL) since the query goes through the linked server.
      */
     public String fetchOib() {
-        String sql = "SELECT TRIM(SUBSTRING(HDBINHALT, 324, 11)) AS OIB FROM " //$NON-NLS-1$
+        String sql = "SELECT TRIM(SUBSTRING(HDBINHALT, 284, 11)) AS OIB FROM " //$NON-NLS-1$
                 + as400Table(mainLibrary(), "HDB") + " WHERE HDBSART = 'BEN'"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         log.debug("fetchOib SQL: {}", sql); //$NON-NLS-1$
         try {
-            List<String> results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("OIB")); //$NON-NLS-1$
+            List<String> results = as400().query(sql, (rs, rowNum) -> rs.getString("OIB")); //$NON-NLS-1$
             if (results.isEmpty()) {
                 log.warn("No BEN record found in HDB ({})", mainLibrary()); //$NON-NLS-1$
                 return null;
@@ -214,11 +233,13 @@ public class As400Repository {
      * so the form-build flow is not blocked when the table is temporarily unavailable.
      */
     public CompanyData fetchCompanyData() {
-        String sql = "SELECT TOP 1 BENNAME1, BENNAME2, BENSTR, BENPLZ, BENORT FROM " //$NON-NLS-1$
-                + as400Table(mainLibrary(), "ZBEN1"); //$NON-NLS-1$ //$NON-NLS-2$
+        String cols = "BENNAME1, BENNAME2, BENSTR, BENPLZ, BENORT"; //$NON-NLS-1$
+        String sql = direct()
+                ? "SELECT " + cols + " FROM " + as400Table(mainLibrary(), "ZBEN1") + " FETCH FIRST 1 ROWS ONLY" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+                : "SELECT TOP 1 " + cols + " FROM " + as400Table(mainLibrary(), "ZBEN1"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         log.debug("fetchCompanyData SQL: {}", sql); //$NON-NLS-1$
         try {
-            return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
+            return as400().queryForObject(sql, (rs, rowNum) -> {
                 String name1 = trim(rs.getString("BENNAME1")); //$NON-NLS-1$
                 String name2 = trim(rs.getString("BENNAME2")); //$NON-NLS-1$
                 String str   = trim(rs.getString("BENSTR")); //$NON-NLS-1$
@@ -479,9 +500,10 @@ public class As400Repository {
     public void insertMimvDetalj(String mandatorId, String oib, int formDate, String sifobr,
                                   int seqNum, int versionNum,
                                   String dateFrom, String dateTo) {
-        String linkedServer = linkedServer();
+        boolean direct = direct();
+        String linkedServer = direct ? null : linkedServer();
         String hfLibrary = settings().hfLibrary();
-        if (linkedServer == null || linkedServer.isBlank()) {
+        if (!direct && (linkedServer == null || linkedServer.isBlank())) {
             throw new IllegalStateException("AS400 linked server is required for MIMV_DETALJ insert. " //$NON-NLS-1$
                     + "Configure AS400_LINKED_SERVER or _cdp_param.aclinkserver."); //$NON-NLS-1$
         }
@@ -494,14 +516,15 @@ public class As400Repository {
         String tsql = loadDetaljSelectSql(mandatorId, oib, formDate, sifobr,
                 seqNum, versionNum, dateFrom, dateTo);
 
-        List<Object[]> rows = jdbcTemplate.query(tsql, (rs, rowNum) -> {
+        List<Object[]> rows = as400().query(tsql, (rs, rowNum) -> {
             Object[] row = new Object[30];
             for (int i = 0; i < 30; i++) {
                 row[i] = rs.getObject(i + 1);
             }
             return row;
         });
-        log.info("Fetched {} rows from AS400 for MIMV_DETALJ insert", rows.size()); //$NON-NLS-1$
+        log.info("Fetched {} rows from AS400 for MIMV_DETALJ insert ({})", rows.size(), //$NON-NLS-1$
+                direct ? "direct AS400" : "linked server " + linkedServer); //$NON-NLS-1$ //$NON-NLS-2$
 
         if (rows.isEmpty()) {
             log.info("No AS400 rows to insert into MIMV_DETALJ"); //$NON-NLS-1$
@@ -713,7 +736,8 @@ public class As400Repository {
         Integer branch = settings().branchFilter();
         try {
             byte[] bytes = getClass().getClassLoader()
-                    .getResourceAsStream("sql/insert_mimv_detalj.sql").readAllBytes(); //$NON-NLS-1$
+                    .getResourceAsStream(direct() ? "sql/insert_mimv_detalj_db2.sql" : "sql/insert_mimv_detalj.sql") //$NON-NLS-1$ //$NON-NLS-2$
+                    .readAllBytes();
             String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
 
             StringBuilder sb = new StringBuilder();
@@ -725,7 +749,7 @@ public class As400Repository {
             String sql = sb.toString();
 
             TenantSettings s = settings();
-            String linkedServer = linkedServer();
+            String linkedServer = s.directAs400() ? null : linkedServer();
             sql = sql.replace("<LINKEDSERVER>",  linkedServer != null ? linkedServer : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<CATALOG>",       s.catalog() != null ? s.catalog() : ""); //$NON-NLS-1$ //$NON-NLS-2$
             sql = sql.replace("<MAINLIBRARY>",   s.mainLibrary() != null ? s.mainLibrary() : ""); //$NON-NLS-1$ //$NON-NLS-2$
@@ -742,12 +766,18 @@ public class As400Repository {
             sql = sql.replace("<BRANCHFILTER>", branch != null //$NON-NLS-1$
                     ? "AND CASE WHEN t1.AENBET > 0 THEN t1.AENBET ELSE t1.ANLBET END = " + branch //$NON-NLS-1$
                     : ""); //$NON-NLS-1$
+            if (s.directAs400()) {
+                // MIMV_ODABRANI_TIPOVI_OBVEZNIKA is a SQL Server table, not on AS400: resolve the flags here
+                List<String> types = fetchOdabraniTipoviObveznika();
+                sql = sql.replace("<MV02>", types.contains("MV02") ? "1 = 1" : "1 = 0"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+                sql = sql.replace("<MV03>", types.contains("MV03") ? "1 = 1" : "1 = 0"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+            }
             log.info("MIMV_DETALJ vehicles: data group {}, branch {}", s.dataGroup(), //$NON-NLS-1$
                     branch != null ? branch : "all"); //$NON-NLS-1$
 
             return sql.trim();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to load sql/insert_mimv_detalj.sql", e); //$NON-NLS-1$
+            throw new RuntimeException("Failed to load the MIMV_DETALJ select SQL", e); //$NON-NLS-1$
         }
     }
 
