@@ -52,6 +52,11 @@ as400:
   catalog: ${AS400_CATALOG:ADRIAVC1}
   data-group: ${AS400_DATA_GROUP:}
   branch: ${AS400_BRANCH:}
+  # Direct AS400 access (JT400). When AS400_HOST is set, AS400 tables are read directly from DB2 for i
+  # (the host must be reachable, e.g. through the VPN tunnel); otherwise through the SQL Server linked server.
+  host: ${AS400_HOST:}
+  user: ${AS400_USER:}
+  password: ${AS400_PASSWORD:}
 
 # --- Integration Hub ---
 # When INTEGRATION_HUB_URL is set, each company's SQL Server connection and AS400 settings are read from

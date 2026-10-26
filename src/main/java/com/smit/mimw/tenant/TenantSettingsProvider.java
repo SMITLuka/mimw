@@ -20,7 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * Config keys (same names in Hub and as env variables): SPRING_DATASOURCE_URL,
  * SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD, SPRING_DATASOURCE_DRIVER,
- * AS400_LINKED_SERVER, AS400_CATALOG, AS400_DATA_GROUP, AS400_BRANCH.
+ * AS400_LINKED_SERVER, AS400_CATALOG, AS400_DATA_GROUP, AS400_BRANCH,
+ * AS400_HOST, AS400_USER, AS400_PASSWORD (direct AS400 access; without AS400_HOST the linked server is used).
  */
 public class TenantSettingsProvider {
 
@@ -96,7 +97,10 @@ public class TenantSettingsProvider {
                 value(config, additional, "AS400_LINKED_SERVER"), //$NON-NLS-1$
                 orDefault(value(config, additional, "AS400_CATALOG"), DEFAULT_CATALOG), //$NON-NLS-1$
                 value(config, additional, "AS400_DATA_GROUP"), //$NON-NLS-1$
-                value(config, additional, "AS400_BRANCH")); //$NON-NLS-1$
+                value(config, additional, "AS400_BRANCH"), //$NON-NLS-1$
+                value(config, additional, "AS400_HOST"), //$NON-NLS-1$
+                value(config, additional, "AS400_USER"), //$NON-NLS-1$
+                value(config, additional, "AS400_PASSWORD")); //$NON-NLS-1$
     }
 
     /** Interface configuration first, then the company's Additional Data; blank counts as not set. */
