@@ -36,7 +36,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -50,15 +49,6 @@ public class MimvFormService {
 
     private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.ofPattern("yyyyMMdd"); //$NON-NLS-1$
 
-    /**
-     * Maps Pantheon taxpayer-type codes to MI-MV form-type codes (SIFRA_OBRASCA_PP).
-     * MV02 -> 401: passenger cars / motorcycles (HFSFZGART: N, V)
-     * MV03 -> 405: quads / ATVs               (HFSFZGART: A, G)
-     */
-    private static final Map<String, String> SIFOBR_BY_TAX_CODE = Map.of(
-            "MV02", "401", //$NON-NLS-1$ //$NON-NLS-2$
-            "MV03", "405"  //$NON-NLS-1$ //$NON-NLS-2$
-    );
 
     private final As400Repository as400Repository;
 
@@ -141,10 +131,10 @@ public class MimvFormService {
 
         // 1. Resolve OIB, company data, and form type code
         String oib = as400Repository.fetchOib();
-        log.info("Fetched OIB from KB0D1.HDB: {}", oib != null ? "***" : "null"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        log.info("Fetched company OIB from AS400 HDB: {}", oib != null ? "***" : "null"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 
         CompanyData companyData = as400Repository.fetchCompanyData();
-        log.info("Fetched company data from KB0D1.ZBEN1"); //$NON-NLS-1$
+        log.info("Fetched company data from AS400 ZBEN1"); //$NON-NLS-1$
 
         String sifobr = toSifobr(request.getTaxPayerCode());
         log.info("Resolved sifobr='{}' from taxPayerCode='{}'", sifobr, request.getTaxPayerCode()); //$NON-NLS-1$
@@ -152,13 +142,15 @@ public class MimvFormService {
         int seqNum     = request.getSequentialNumberInPeriod() != null ? request.getSequentialNumberInPeriod() : 1;
         int versionNum = request.getVersionNumber() != null ? request.getVersionNumber() : 1;
 
-        int formDateInt = request.getFormDate() != null ? Integer.parseInt(request.getFormDate().format(YYYYMMDD)) : 0;
+        // The form is keyed by the first day of its period (as IVAS does), not by the day it was created,
+        // so forms for different months built on the same day no longer overwrite each other.
+        int formDateInt = request.getDateFrom() != null ? Integer.parseInt(request.getDateFrom().format(YYYYMMDD))
+                : request.getFormDate() != null ? Integer.parseInt(request.getFormDate().format(YYYYMMDD)) : 0;
         String dateFrom = request.getDateFrom() != null ? request.getDateFrom().format(YYYYMMDD) : ""; //$NON-NLS-1$
         String dateTo   = request.getDateTo()   != null ? request.getDateTo().format(YYYYMMDD)   : ""; //$NON-NLS-1$
 
-        // 2. Build composite identifier: oib-formDate-sifobr-seq-version
-        String compositeId = String.format("%s-%s-%s-%02d-%03d", //$NON-NLS-1$
-                oib != null ? oib : "", formDateInt, sifobr != null ? sifobr : "", seqNum, versionNum); //$NON-NLS-1$ //$NON-NLS-2$
+        // 2. Build the identifier as IVAS does: oib-ddMMyyyy(period start)-405-seq-version
+        String compositeId = MimvXmlBuilder.identifier(oib, request.getDateFrom(), seqNum, versionNum);
 
         // 3. Delete existing detail rows first (FK child before parent)
         as400Repository.deleteMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
@@ -265,15 +257,15 @@ public class MimvFormService {
 
         String oib        = as400Repository.fetchOib();
         String sifobr     = toSifobr(d.getTaxPayerCode());
-        int    formDate   = d.getFormDate()                    != null ? d.getFormDate()                    : 0;
+        int    formDate   = z != null && z.getDateFrom() != null ? Integer.parseInt(z.getDateFrom().format(YYYYMMDD))
+                          : d.getFormDate() != null ? d.getFormDate() : 0;
         int    seqNum     = d.getSequentialNumberInPeriod()    != null ? d.getSequentialNumberInPeriod()    : 1;
         int    versionNum = d.getVersionNumber()               != null ? d.getVersionNumber()               : 1;
 
         log.info("updateForm: formDate={}, taxPayerCode={}, sifobr={}, seq={}, ver={}", //$NON-NLS-1$
                 formDate, d.getTaxPayerCode(), sifobr, seqNum, versionNum);
 
-        String compositeId = String.format("%s-%s-%s-%02d-%03d", //$NON-NLS-1$
-                oib != null ? oib : "", formDate, sifobr != null ? sifobr : "", seqNum, versionNum); //$NON-NLS-1$ //$NON-NLS-2$
+        String compositeId = MimvXmlBuilder.identifier(oib, z != null ? z.getDateFrom() : null, seqNum, versionNum);
 
         // Delete child rows first (FK constraint), then parent
         as400Repository.deleteMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);
@@ -405,6 +397,13 @@ public class MimvFormService {
         }
 
         String oib = as400Repository.fetchOib();
+        if (!isValidOib(oib))
+        {
+            String msg = "OIB obveznika procitan s AS400 (HDB, zapis BEN) nije ispravan: '" + (oib != null ? oib : "") //$NON-NLS-1$ //$NON-NLS-2$
+                    + "'. Provjerite AS400_DATA_GROUP u Integration Hubu i OIB firme na AS400."; //$NON-NLS-1$
+            log.warn("confirmForm: {}", msg); //$NON-NLS-1$
+            throw new IllegalArgumentException(msg);
+        }
 
         BigDecimal totalNew  = BigDecimal.ZERO;
         BigDecimal totalUsed = BigDecimal.ZERO;
@@ -424,8 +423,9 @@ public class MimvFormService {
 
         String xmlContent = MimvXmlBuilder.build(oib, data, totalNew, totalUsed);
 
-        String sifobr   = "MV03".equalsIgnoreCase(data.getTaxPayerCode()) ? "405" : "401"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
-        String filename = "ET405AA_" + sifobr + ".xml"; //$NON-NLS-1$ //$NON-NLS-2$
+        int    seqNum   = data.getSequentialNumberInPeriod() != null ? data.getSequentialNumberInPeriod() : 1;
+        int    verNum   = data.getVersionNumber()            != null ? data.getVersionNumber()            : 1;
+        String filename = MimvXmlBuilder.fileName(oib, z.getDateFrom(), seqNum, verNum);
         String email    = z.getDestinationEmail();
 
         sendXmlEmail(email, xmlContent, filename, z);
@@ -497,13 +497,39 @@ public class MimvFormService {
     // Private helpers
     // -------------------------------------------------------------------------
 
+    /**
+     * SIFRA_OBRASCA_PP. IVAS uses 405 (ET405AA) for every taxpayer type, so the code no longer
+     * depends on MV02 / MV03.
+     */
     private static String toSifobr(String taxPayerCode)
     {
-        if (taxPayerCode == null)
+        return MimvXmlBuilder.FORM_CODE;
+    }
+
+    /** Croatian OIB: 11 digits with an ISO 7064 (MOD 11,10) check digit. */
+    static boolean isValidOib(String oib)
+    {
+        if (oib == null)
         {
-            return null;
+            return false;
         }
-        return SIFOBR_BY_TAX_CODE.get(taxPayerCode.toUpperCase());
+        String o = oib.trim();
+        if (!o.matches("\\d{11}")) //$NON-NLS-1$
+        {
+            return false;
+        }
+        int a = 10;
+        for (int i = 0; i < 10; i++)
+        {
+            a = (a + (o.charAt(i) - '0')) % 10;
+            if (a == 0)
+            {
+                a = 10;
+            }
+            a = (a * 2) % 11;
+        }
+        int check = (11 - a) % 10;
+        return check == o.charAt(10) - '0';
     }
 
     private static boolean isBlank(String s)

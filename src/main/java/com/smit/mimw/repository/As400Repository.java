@@ -521,6 +521,7 @@ public class As400Repository {
             for (int i = 0; i < 30; i++) {
                 row[i] = rs.getObject(i + 1);
             }
+            row[9] = withCroatianSuffix(row[9]); // TIP_VARIJANTA_TRG_NAZIV
             return row;
         });
         log.info("Fetched {} rows from AS400 for MIMV_DETALJ insert ({})", rows.size(), //$NON-NLS-1$
@@ -543,6 +544,19 @@ public class As400Repository {
 
         jdbcTemplate.batchUpdate(insertSql, rows);
         log.info("Batch-inserted {} rows into MIMV_DETALJ for formDate={}, sifobr={}", rows.size(), formDate, sifobr); //$NON-NLS-1$
+    }
+
+    /**
+     * The vehicle-name SQL appends the gearbox and paint type in plain ASCII ("rucni, obicna"),
+     * because accented literals do not survive every AS400 job CCSID. IVAS writes them with
+     * Croatian letters, so they are fixed here: rucni -> ručni, obicna -> obična.
+     */
+    static Object withCroatianSuffix(Object value) {
+        if (!(value instanceof String s)) {
+            return value;
+        }
+        return s.replace(", rucni,", ", ručni,") //$NON-NLS-1$ //$NON-NLS-2$
+                .replaceAll(", obicna$", ", obična"); //$NON-NLS-1$ //$NON-NLS-2$
     }
 
     /**

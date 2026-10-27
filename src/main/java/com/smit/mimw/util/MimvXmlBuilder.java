@@ -5,26 +5,53 @@ import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.ZaglavljeUpdateData;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
+import java.util.Locale;
 
 /**
  * Builds the ET405AA XML string from MIMV form data.
  * Conforms to etrosET405AA.xsd, etrosSimpleType.xsd, and etrosComplexType.xsd.
  * Optional XSD fields are omitted when null, zero, or blank to avoid schema violations.
+ * The layout follows the XML that IVAS (AS400) produces for the same form: standalone declaration,
+ * ct: prefix for the complex-type namespace, 4-space indentation and the identifier
+ * OIB-ddMMyyyy(period start)-405-seq-version.
  */
 public final class MimvXmlBuilder
 {
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ISO_LOCAL_DATE;
+    /** Form code used in the identifier and file name (ET405AA), the same for every taxpayer type. */
+    public static final String FORM_CODE = "405"; //$NON-NLS-1$
 
-    private static final Map<String, String> SIFOBR_MAP = Map.of(
-            "MV02", "401", //$NON-NLS-1$ //$NON-NLS-2$
-            "MV03", "405"  //$NON-NLS-1$ //$NON-NLS-2$
-    );
+    private static final DateTimeFormatter DATE_FMT  = DateTimeFormatter.ISO_LOCAL_DATE;
+    private static final DateTimeFormatter ID_DATE   = DateTimeFormatter.ofPattern("ddMMyyyy"); //$NON-NLS-1$
+    private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd"); //$NON-NLS-1$
+
+    private static final String NS     = "http://apisit.hr/b18/etrosarine/ET405AA"; //$NON-NLS-1$
+    private static final String NS_CT  = "http://apisit.hr/b18/etrosarine/complexType"; //$NON-NLS-1$
+    private static final String INDENT = "    "; //$NON-NLS-1$
 
     private MimvXmlBuilder()
     {
+    }
+
+    /**
+     * Form identifier as IVAS builds it: OIB-ddMMyyyy-405-seq(2)-version(3), the date being the
+     * first day of the reporting period, e.g. 32966713543-01082026-405-01-001.
+     */
+    public static String identifier(String oib, LocalDate periodFrom, int seqNum, int versionNum)
+    {
+        String cleanOib = oib != null ? oib.replaceAll("\\s+", "") : ""; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        String date     = periodFrom != null ? periodFrom.format(ID_DATE) : "00000000"; //$NON-NLS-1$
+        return String.format("%s-%s-%s-%02d-%03d", cleanOib, date, FORM_CODE, seqNum, versionNum); //$NON-NLS-1$
+    }
+
+    /** Attachment file name as IVAS names it: MIMV_OIB_yyyyMMdd_405_seq_version.xml. */
+    public static String fileName(String oib, LocalDate periodFrom, int seqNum, int versionNum)
+    {
+        String cleanOib = oib != null ? oib.replaceAll("\\s+", "") : ""; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        String date     = periodFrom != null ? periodFrom.format(FILE_DATE) : "00000000"; //$NON-NLS-1$
+        return "MIMV_" + cleanOib + "_" + date + "_" + FORM_CODE + "_" + seqNum + "_" + versionNum + ".xml"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$
     }
 
     /**
@@ -42,42 +69,48 @@ public final class MimvXmlBuilder
         List<MimvDetaljItem> detalji = data.getDetalji();
 
         String cleanOib   = oib != null ? oib.replaceAll("\\s+", "") : ""; //$NON-NLS-1$ //$NON-NLS-2$
-        String taxCode    = data.getTaxPayerCode() != null ? data.getTaxPayerCode().toUpperCase() : ""; //$NON-NLS-1$
-        String sifobr     = SIFOBR_MAP.getOrDefault(taxCode, ""); //$NON-NLS-1$
-        int    formDate   = data.getFormDate()                 != null ? data.getFormDate()                 : 0;
         int    seqNum     = data.getSequentialNumberInPeriod() != null ? data.getSequentialNumberInPeriod() : 1;
         int    versionNum = data.getVersionNumber()            != null ? data.getVersionNumber()            : 1;
         String actionCode = z != null && z.getActionCode() != null ? z.getActionCode() : "N"; //$NON-NLS-1$
+        LocalDate from    = z != null ? z.getDateFrom() : null;
 
-        String identifikator = String.format("%s-%08d-%s-%02d-%03d", //$NON-NLS-1$
-                cleanOib, formDate, sifobr, seqNum, versionNum);
+        String i1 = INDENT;
+        String i2 = INDENT + INDENT;
+        String i3 = i2 + INDENT;
 
         StringBuilder sb = new StringBuilder(8192);
-        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"); //$NON-NLS-1$
-        sb.append("<ET405AA xmlns=\"http://apisit.hr/b18/etrosarine/ET405AA\">\n"); //$NON-NLS-1$
-        sb.append("  <Akcija>").append(esc(actionCode)).append("</Akcija>\n"); //$NON-NLS-1$ //$NON-NLS-2$
-        sb.append("  <MIMVObrazac>\n"); //$NON-NLS-1$
-        sb.append("    <Identifikator>").append(esc(identifikator)).append("</Identifikator>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"); //$NON-NLS-1$
+        sb.append("<ET405AA xmlns:ct=\"").append(NS_CT).append("\" xmlns=\"").append(NS).append("\">\n"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        sb.append(i1).append("<Akcija>").append(esc(actionCode)).append("</Akcija>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append(i1).append("<MIMVObrazac>\n"); //$NON-NLS-1$
+        sb.append(i2).append("<Identifikator>").append(esc(identifier(cleanOib, from, seqNum, versionNum))).append("</Identifikator>\n"); //$NON-NLS-1$ //$NON-NLS-2$
 
-        if (z != null && z.getDateFrom() != null)
+        if (from != null)
         {
-            sb.append("    <RazdobljeOd>").append(z.getDateFrom().format(DATE_FMT)).append("</RazdobljeOd>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+            sb.append(i2).append("<RazdobljeOd>").append(from.format(DATE_FMT)).append("</RazdobljeOd>\n"); //$NON-NLS-1$ //$NON-NLS-2$
         }
         if (z != null && z.getDateTo() != null)
         {
-            sb.append("    <RazdobljeDo>").append(z.getDateTo().format(DATE_FMT)).append("</RazdobljeDo>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+            sb.append(i2).append("<RazdobljeDo>").append(z.getDateTo().format(DATE_FMT)).append("</RazdobljeDo>\n"); //$NON-NLS-1$ //$NON-NLS-2$
         }
 
-        sb.append("    <Obveznik>\n"); //$NON-NLS-1$
-        sb.append("      <OIB>").append(esc(cleanOib)).append("</OIB>\n"); //$NON-NLS-1$ //$NON-NLS-2$
-        sb.append("      <CarinskiUred>").append(esc(padCarinskiUred(z != null ? z.getTaxOfficeCode() : null))).append("</CarinskiUred>\n"); //$NON-NLS-1$ //$NON-NLS-2$
-        sb.append("    </Obveznik>\n"); //$NON-NLS-1$
+        sb.append(i2).append("<Obveznik>\n"); //$NON-NLS-1$
+        sb.append(i3).append("<OIB>").append(esc(cleanOib)).append("</OIB>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append(i3).append("<CarinskiUred>").append(esc(padCarinskiUred(z != null ? z.getTaxOfficeCode() : null))).append("</CarinskiUred>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append(i2).append("</Obveznik>\n"); //$NON-NLS-1$
 
-        sb.append("    <TipoviObveznika>\n"); //$NON-NLS-1$
-        sb.append("      <TipObveznika>").append(esc(data.getTaxPayerCode())).append("</TipObveznika>\n"); //$NON-NLS-1$ //$NON-NLS-2$
-        sb.append("    </TipoviObveznika>\n"); //$NON-NLS-1$
+        sb.append(i2).append("<TipoviObveznika>\n"); //$NON-NLS-1$
+        String codes = data.getTaxPayerCode() != null ? data.getTaxPayerCode() : ""; //$NON-NLS-1$
+        for (String code : codes.split("[,;]")) //$NON-NLS-1$
+        {
+            if (!code.isBlank())
+            {
+                sb.append(i3).append("<ct:TipObveznika>").append(esc(code.trim().toUpperCase())).append("</ct:TipObveznika>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+            }
+        }
+        sb.append(i2).append("</TipoviObveznika>\n"); //$NON-NLS-1$
 
-        sb.append("    <Stavke>\n"); //$NON-NLS-1$
+        sb.append(i2).append("<Stavke>\n"); //$NON-NLS-1$
         if (detalji != null)
         {
             for (MimvDetaljItem item : detalji)
@@ -85,21 +118,21 @@ public final class MimvXmlBuilder
                 appendVehicle(sb, item);
             }
         }
-        sb.append("    </Stavke>\n"); //$NON-NLS-1$
+        sb.append(i2).append("</Stavke>\n"); //$NON-NLS-1$
 
-        sb.append("    <UkIznosPPNova>").append(fmt2(totalNew)).append("</UkIznosPPNova>\n"); //$NON-NLS-1$ //$NON-NLS-2$
-        sb.append("    <UkIznosPPRabljena>").append(fmt2(totalUsed)).append("</UkIznosPPRabljena>\n"); //$NON-NLS-1$ //$NON-NLS-2$
-        sb.append("    <UkIznosPPNovaIRabljena>").append(fmt2(totalNew.add(totalUsed))).append("</UkIznosPPNovaIRabljena>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append(i2).append("<UkIznosPPNova>").append(fmt2(totalNew)).append("</UkIznosPPNova>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append(i2).append("<UkIznosPPRabljena>").append(fmt2(totalUsed)).append("</UkIznosPPRabljena>\n"); //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append(i2).append("<UkIznosPPNovaIRabljena>").append(fmt2(totalNew.add(totalUsed))).append("</UkIznosPPNovaIRabljena>\n"); //$NON-NLS-1$ //$NON-NLS-2$
 
-        sb.append("  </MIMVObrazac>\n"); //$NON-NLS-1$
-        sb.append("</ET405AA>"); //$NON-NLS-1$
+        sb.append(i1).append("</MIMVObrazac>\n"); //$NON-NLS-1$
+        sb.append("</ET405AA>\n"); //$NON-NLS-1$
 
         return sb.toString();
     }
 
     private static void appendVehicle(StringBuilder sb, MimvDetaljItem item)
     {
-        sb.append("      <PodatakVozila>\n"); //$NON-NLS-1$
+        sb.append(INDENT).append(INDENT).append(INDENT).append("<PodatakVozila>\n"); //$NON-NLS-1$
 
         // mandatory fields
         el(sb, "StatusVozila",         item.getStatusVozila()); //$NON-NLS-1$
@@ -131,7 +164,7 @@ public final class MimvXmlBuilder
         el(sb, "DatumIzdavanjaRacuna", intToDate(item.getDatumIzdavanjaRacuna())); //$NON-NLS-1$
         el(sb, "ObracunatiIznosPP",    fmt2(item.getObracunatiIznosPP())); //$NON-NLS-1$
 
-        sb.append("      </PodatakVozila>\n"); //$NON-NLS-1$
+        sb.append(INDENT).append(INDENT).append(INDENT).append("</PodatakVozila>\n"); //$NON-NLS-1$
     }
 
     // -------------------------------------------------------------------------
@@ -140,7 +173,7 @@ public final class MimvXmlBuilder
 
     private static void el(StringBuilder sb, String name, String value)
     {
-        sb.append("        <").append(name).append(">") //$NON-NLS-1$ //$NON-NLS-2$
+        sb.append(INDENT).append(INDENT).append(INDENT).append(INDENT).append("<").append(name).append(">") //$NON-NLS-1$ //$NON-NLS-2$
           .append(esc(value != null ? value : "")) //$NON-NLS-1$
           .append("</").append(name).append(">\n"); //$NON-NLS-1$ //$NON-NLS-2$
     }
@@ -182,7 +215,7 @@ public final class MimvXmlBuilder
     {
         if (value != null && value.compareTo(BigDecimal.ZERO) > 0)
         {
-            el(sb, name, String.format("%." + scale + "f", value)); //$NON-NLS-1$ //$NON-NLS-2$
+            el(sb, name, String.format(Locale.ROOT, "%." + scale + "f", value)); //$NON-NLS-1$ //$NON-NLS-2$
         }
     }
 
@@ -190,7 +223,7 @@ public final class MimvXmlBuilder
     {
         if (value != null)
         {
-            el(sb, name, String.format("%." + scale + "f", value)); //$NON-NLS-1$ //$NON-NLS-2$
+            el(sb, name, String.format(Locale.ROOT, "%." + scale + "f", value)); //$NON-NLS-1$ //$NON-NLS-2$
         }
     }
 
@@ -200,7 +233,7 @@ public final class MimvXmlBuilder
 
     private static String fmt2(BigDecimal value)
     {
-        return value != null ? String.format("%.2f", value) : "0.00"; //$NON-NLS-1$ //$NON-NLS-2$
+        return value != null ? String.format(Locale.ROOT, "%.2f", value) : "0.00"; //$NON-NLS-1$ //$NON-NLS-2$
     }
 
     /**
