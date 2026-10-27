@@ -124,7 +124,7 @@ SELECT
     ''                                                                                              AS VOZILO_81,
     CAST(0 AS DECIMAL(7,2))                                                                         AS TESTNO_VOZILO,
     CAST(0 AS DECIMAL(7,2))                                                                         AS DEPRECIJACIJA,
-    LEFT(CASE WHEN HFBRPNM1 = '' THEN HFKKFNM1 ELSE HFBRPNM1 END, 80)                              AS POREZNI_OBVEZNIK,
+    CAST(TRIM(CASE WHEN TRIM(HFBRPNM1) = '' THEN HFKKFNM1 ELSE HFBRPNM1 END) AS VARCHAR(80))       AS POREZNI_OBVEZNIK,
     CASE WHEN oib_poreznog IS NOT NULL THEN LEFT(oib_poreznog, 11) ELSE '' END                      AS OIB,
     LEFT(TRIM(CAST(BIGINT(HFBBLFA) AS VARCHAR(20))) || '/'
          || TRIM(CAST(BIGINT(CASE WHEN AENBET > 0 THEN AENBET ELSE ANLBET END) AS VARCHAR(20))) || '/6', 30) AS BROJ_RACUNA,
