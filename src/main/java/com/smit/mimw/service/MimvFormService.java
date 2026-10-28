@@ -13,6 +13,7 @@ import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
 import com.smit.mimw.dto.MimvZaglavljeItem;
 import com.smit.mimw.dto.PreviewExistingResponse;
+import com.smit.mimw.dto.SettingsRequest;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.dto.TaxOfficesResponse;
 import com.smit.mimw.dto.TaxPayerType;
@@ -68,7 +69,7 @@ public class MimvFormService {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns all MIMV taxpayer types from MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
+     * Returns all MIMV taxpayer types from MIMV_POSTAVKE.
      * Descriptions are fixed per type code; selected flag reflects the BIT value in the table.
      */
     public TaxPayerTypesResponse getTaxPayerTypes(String mandatorId, String companyId) {
@@ -80,32 +81,68 @@ public class MimvFormService {
                 TaxPayerType.builder().taxPayerCode("MV02").taxPayerDescription("TRGOVAC NOVIM MOT.VOZILIMA").selected(selectedCodes.contains("MV02")).build(), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
                 TaxPayerType.builder().taxPayerCode("MV03").taxPayerDescription("REG.TRGOVAC RABLJENIM MOT.VOZ.").selected(selectedCodes.contains("MV03")).build() //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         );
+        As400Repository.Postavke postavke = as400Repository.fetchPostavke();
         return TaxPayerTypesResponse.builder()
                 .taxPayerTypes(types)
+                .destinationEmail(postavke.email())
+                .taxOfficeCode(postavke.taxOfficeCode())
+                .taxOfficeDescription(postavke.taxOfficeDescription())
                 .build();
     }
 
     /**
-     * Saves taxpayer type selection into MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
+     * Saves taxpayer type selection into MIMV_POSTAVKE (old endpoint, keeps e-mail and customs office).
      * The request list represents the selected codes; any code absent from the list is stored as 0.
      */
     public IsSuccessResponse saveTaxPayerType(String mandatorId, String companyId, List<TaxPayerTypeRequest> requests) {
-        log.info("saveTaxPayerType called for mandatorId={}, companyId={}, count={}", mandatorId, companyId, requests.size()); //$NON-NLS-1$
-        for (TaxPayerTypeRequest request : requests) {
-            if (request.getTaxPayerCode() == null || request.getTaxPayerCode().isBlank()) {
+        return saveSettings(mandatorId, companyId, SettingsRequest.builder().taxPayerTypes(requests).build(), false);
+    }
+
+    /**
+     * Saves everything from the "Postavke" tab into MIMV_POSTAVKE: taxpayer types, e-mail and customs office.
+     */
+    public IsSuccessResponse saveSettings(String mandatorId, String companyId, SettingsRequest request) {
+        return saveSettings(mandatorId, companyId, request, true);
+    }
+
+    private IsSuccessResponse saveSettings(String mandatorId, String companyId, SettingsRequest request, boolean withMailAndOffice) {
+        List<TaxPayerTypeRequest> requests = request.getTaxPayerTypes() != null ? request.getTaxPayerTypes() : List.of();
+        log.info("saveSettings for mandatorId={}, companyId={}, types={}", mandatorId, companyId, requests.size()); //$NON-NLS-1$
+        for (TaxPayerTypeRequest r : requests) {
+            if (r.getTaxPayerCode() == null || r.getTaxPayerCode().isBlank()) {
                 throw new IllegalArgumentException("taxPayerCode is required."); //$NON-NLS-1$
             }
         }
-        String oib = as400Repository.fetchOibFromOdabraniTipoviObveznika();
+        String email = null;
+        String officeCode = null;
+        String officeDesc = null;
+        if (withMailAndOffice) {
+            email      = request.getDestinationEmail() != null ? request.getDestinationEmail().trim() : ""; //$NON-NLS-1$
+            officeCode = request.getTaxOfficeCode() != null ? request.getTaxOfficeCode().trim() : ""; //$NON-NLS-1$
+            officeDesc = request.getTaxOfficeDescription() != null ? request.getTaxOfficeDescription().trim() : ""; //$NON-NLS-1$
+            if (email.length() > 80) {
+                throw new IllegalArgumentException("E-mail adresa smije imati najvise 80 znakova."); //$NON-NLS-1$
+            }
+            if (officeCode.length() > 6) {
+                throw new IllegalArgumentException("Sifra carinskog ureda smije imati najvise 6 znakova."); //$NON-NLS-1$
+            }
+            if (officeDesc.length() > 50) {
+                officeDesc = officeDesc.substring(0, 50);
+            }
+        }
+        String oib = as400Repository.fetchOibFromPostavke();
         if (oib == null) {
-            log.info("No existing row in MIMV_ODABRANI_TIPOVI_OBVEZNIKA, falling back to AS400 for OIB"); //$NON-NLS-1$
+            log.info("No existing row in MIMV_POSTAVKE, falling back to AS400 for OIB"); //$NON-NLS-1$
             oib = as400Repository.fetchOib();
+        }
+        if (oib == null || oib.isBlank()) {
+            throw new IllegalArgumentException("OIB firme nije pronaden na AS400 (HDB, zapis BEN). " //$NON-NLS-1$
+                    + "Provjerite AS400_DATA_GROUP u Integration Hubu."); //$NON-NLS-1$
         }
         boolean mv01 = requests.stream().anyMatch(r -> "MV01".equalsIgnoreCase(r.getTaxPayerCode()) && r.isSelected()); //$NON-NLS-1$
         boolean mv02 = requests.stream().anyMatch(r -> "MV02".equalsIgnoreCase(r.getTaxPayerCode()) && r.isSelected()); //$NON-NLS-1$
         boolean mv03 = requests.stream().anyMatch(r -> "MV03".equalsIgnoreCase(r.getTaxPayerCode()) && r.isSelected()); //$NON-NLS-1$
-        as400Repository.upsertOdabraniTipoviObveznika(oib, mv01, mv02, mv03);
-        log.info("Saved taxpayer type selection: MV01={}, MV02={}, MV03={}", mv01, mv02, mv03); //$NON-NLS-1$
+        as400Repository.upsertPostavke(oib, mv01, mv02, mv03, email, officeCode, officeDesc);
         return IsSuccessResponse.builder().isSuccess(true).build();
     }
 

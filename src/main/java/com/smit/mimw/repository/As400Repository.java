@@ -263,17 +263,17 @@ public class As400Repository {
     }
 
     // -------------------------------------------------------------------------
-    // MIMV_ODABRANI_TIPOVI_OBVEZNIKA — Pantheon MSSQL (local, no linked server)
+    // MIMV_POSTAVKE (settings) — Pantheon MSSQL (local, no linked server)
     // -------------------------------------------------------------------------
 
     /**
-     * Returns the OIB_OBVEZNIKA from the existing MIMV_ODABRANI_TIPOVI_OBVEZNIKA row, or null if no row exists.
+     * Returns the OIB_OBVEZNIKA from the existing MIMV_POSTAVKE row, or null if no row exists.
      * Used by saveTaxPayerType to avoid an AS400 round-trip when a row is already present.
      */
-    public String fetchOibFromOdabraniTipoviObveznika() {
+    public String fetchOibFromPostavke() {
         try {
             List<String> result = jdbcTemplate.query(
-                    "SELECT TOP 1 OIB_OBVEZNIKA FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA", //$NON-NLS-1$
+                    "SELECT TOP 1 OIB_OBVEZNIKA FROM MIMV_POSTAVKE", //$NON-NLS-1$
                     (rs) -> {
                         if (rs.next()) {
                             return java.util.Collections.singletonList(rs.getString("OIB_OBVEZNIKA")); //$NON-NLS-1$
@@ -282,20 +282,20 @@ public class As400Repository {
                     });
             return result.isEmpty() ? null : result.get(0);
         } catch (Exception e) {
-            log.warn("Could not fetch OIB from MIMV_ODABRANI_TIPOVI_OBVEZNIKA: {}", e.getMessage()); //$NON-NLS-1$
+            log.warn("Could not fetch OIB from MIMV_POSTAVKE: {}", e.getMessage()); //$NON-NLS-1$
             return null;
         }
     }
 
     /**
-     * Returns the list of active taxpayer type codes (MV01, MV02, MV03) from MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
+     * Returns the list of active taxpayer type codes (MV01, MV02, MV03) from MIMV_POSTAVKE.
      * Uses SELECT TOP 1 without OIB filter — single-company app, exactly one row expected.
      * Reads BIT values by column index to avoid any column-name encoding issues.
      * Returns an empty list if no row exists or the query fails.
      */
     public List<String> fetchOdabraniTipoviObveznika() {
         String sql = "SELECT TOP 1 [MV01_PROIZVOĐAČ], MV02_TRGOVAC_NOVIM, MV03_TRGOVAC_RABLJENIM" //$NON-NLS-1$
-                + " FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA"; //$NON-NLS-1$
+                + " FROM MIMV_POSTAVKE"; //$NON-NLS-1$
         log.info("fetchOdabraniTipoviObveznika: executing query"); //$NON-NLS-1$
         try {
             return jdbcTemplate.query(sql, (rs) -> {
@@ -309,7 +309,7 @@ public class As400Repository {
                     if (mv02) types.add("MV02"); //$NON-NLS-1$
                     if (mv03) types.add("MV03"); //$NON-NLS-1$
                 } else {
-                    log.warn("fetchOdabraniTipoviObveznika: no rows found in MIMV_ODABRANI_TIPOVI_OBVEZNIKA"); //$NON-NLS-1$
+                    log.warn("fetchOdabraniTipoviObveznika: no rows found in MIMV_POSTAVKE"); //$NON-NLS-1$
                 }
                 return types;
             });
@@ -321,12 +321,12 @@ public class As400Repository {
 
     /**
      * Returns the list of active taxpayer type codes (MV01, MV02, MV03) for the given OIB.
-     * Queries MIMV_ODABRANI_TIPOVI_OBVEZNIKA filtered by OIB_OBVEZNIKA.
+     * Queries MIMV_POSTAVKE filtered by OIB_OBVEZNIKA.
      * Returns an empty list if the row does not exist or the query fails.
      */
     public List<String> fetchOdabraniTipoviObveznika(String oib) {
         String sql = "SELECT [MV01_PROIZVOĐAČ] AS mv01, MV02_TRGOVAC_NOVIM AS mv02, MV03_TRGOVAC_RABLJENIM AS mv03" //$NON-NLS-1$
-                + " FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE OIB_OBVEZNIKA = ?"; //$NON-NLS-1$
+                + " FROM MIMV_POSTAVKE WHERE OIB_OBVEZNIKA = ?"; //$NON-NLS-1$
         try {
             return jdbcTemplate.query(sql, (rs) -> {
                 List<String> types = new ArrayList<>();
@@ -338,32 +338,52 @@ public class As400Repository {
                 return types;
             }, oib);
         } catch (Exception e) {
-            log.warn("Could not fetch MIMV_ODABRANI_TIPOVI_OBVEZNIKA for oib=***: {}", e.getMessage()); //$NON-NLS-1$
+            log.warn("Could not fetch MIMV_POSTAVKE for oib=***: {}", e.getMessage()); //$NON-NLS-1$
             return new ArrayList<>();
         }
     }
 
+    /** Company settings stored in MIMV_POSTAVKE besides the taxpayer types. */
+    public record Postavke(String email, String taxOfficeCode, String taxOfficeDescription) {
+    }
+
     /**
-     * Saves selected taxpayer types for the given OIB into MIMV_ODABRANI_TIPOVI_OBVEZNIKA.
-     * Uses UPDATE if the row already exists, INSERT otherwise — avoids requiring DELETE permission.
-     *
-     * @param oib   OIB_OBVEZNIKA
-     * @param mv01  true if MV01_PROIZVOĐAČ should be set
-     * @param mv02  true if MV02_TRGOVAC_NOVIM should be set
-     * @param mv03  true if MV03_TRGOVAC_RABLJENIM should be set
+     * Returns e-mail and customs office from MIMV_POSTAVKE (single-company table, TOP 1).
+     * Returns empty values when there is no row yet.
      */
-    public void upsertOdabraniTipoviObveznika(String oib, boolean mv01, boolean mv02, boolean mv03) {
+    public Postavke fetchPostavke() {
+        String sql = "SELECT TOP 1 EMAIL_ADRESA, CARINSKI_URED, CARINSKI_URED_OPIS FROM MIMV_POSTAVKE"; //$NON-NLS-1$
+        try {
+            return jdbcTemplate.query(sql, (rs) -> rs.next()
+                    ? new Postavke(orEmpty(rs.getString(1)), orEmpty(rs.getString(2)), orEmpty(rs.getString(3)))
+                    : new Postavke("", "", "")); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        } catch (Exception e) {
+            log.warn("fetchPostavke failed: {}", e.getMessage()); //$NON-NLS-1$
+            return new Postavke("", "", ""); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        }
+    }
+
+    /**
+     * Saves the settings for the given OIB into MIMV_POSTAVKE.
+     * Uses UPDATE if the row already exists, INSERT otherwise — avoids requiring DELETE permission.
+     * A null e-mail / customs office keeps the stored value (used by the old /taxpayer/type endpoint).
+     */
+    public void upsertPostavke(String oib, boolean mv01, boolean mv02, boolean mv03,
+                               String email, String taxOfficeCode, String taxOfficeDescription) {
         int updated = jdbcTemplate.update(
-                "UPDATE MIMV_ODABRANI_TIPOVI_OBVEZNIKA SET [MV01_PROIZVOĐAČ] = ?, MV02_TRGOVAC_NOVIM = ?, MV03_TRGOVAC_RABLJENIM = ?" //$NON-NLS-1$
+                "UPDATE MIMV_POSTAVKE SET [MV01_PROIZVOĐAČ] = ?, MV02_TRGOVAC_NOVIM = ?, MV03_TRGOVAC_RABLJENIM = ?," //$NON-NLS-1$
+                + " EMAIL_ADRESA = COALESCE(?, EMAIL_ADRESA), CARINSKI_URED = COALESCE(?, CARINSKI_URED)," //$NON-NLS-1$
+                + " CARINSKI_URED_OPIS = COALESCE(?, CARINSKI_URED_OPIS)" //$NON-NLS-1$
                 + " WHERE OIB_OBVEZNIKA = ?", //$NON-NLS-1$
-                mv01 ? 1 : 0, mv02 ? 1 : 0, mv03 ? 1 : 0, oib);
+                mv01 ? 1 : 0, mv02 ? 1 : 0, mv03 ? 1 : 0, email, taxOfficeCode, taxOfficeDescription, oib);
         if (updated == 0) {
             jdbcTemplate.update(
-                    "INSERT INTO MIMV_ODABRANI_TIPOVI_OBVEZNIKA (OIB_OBVEZNIKA, [MV01_PROIZVOĐAČ], MV02_TRGOVAC_NOVIM, MV03_TRGOVAC_RABLJENIM)" //$NON-NLS-1$
-                    + " VALUES (?, ?, ?, ?)", //$NON-NLS-1$
-                    oib, mv01 ? 1 : 0, mv02 ? 1 : 0, mv03 ? 1 : 0);
+                    "INSERT INTO MIMV_POSTAVKE (OIB_OBVEZNIKA, [MV01_PROIZVOĐAČ], MV02_TRGOVAC_NOVIM, MV03_TRGOVAC_RABLJENIM," //$NON-NLS-1$
+                    + " EMAIL_ADRESA, CARINSKI_URED, CARINSKI_URED_OPIS) VALUES (?, ?, ?, ?, ?, ?, ?)", //$NON-NLS-1$
+                    oib, mv01 ? 1 : 0, mv02 ? 1 : 0, mv03 ? 1 : 0, email, taxOfficeCode, taxOfficeDescription);
         }
-        log.info("Saved MIMV_ODABRANI_TIPOVI_OBVEZNIKA for oib=***: mv01={}, mv02={}, mv03={}", mv01, mv02, mv03); //$NON-NLS-1$
+        log.info("Saved MIMV_POSTAVKE for oib=***: mv01={}, mv02={}, mv03={}, email set={}, taxOffice={}", //$NON-NLS-1$
+                mv01, mv02, mv03, email != null && !email.isBlank(), taxOfficeCode);
     }
 
     // -------------------------------------------------------------------------
@@ -491,7 +511,7 @@ public class As400Repository {
      * Two-step approach to avoid DTC (Distributed Transaction Coordinator):
      * 1. Execute the T-SQL SELECT directly against Pantheon MSSQL — AS400 HF tables are
      *    accessed via 4-part linked server naming ([linkedServer].[catalog].[library].[table]).
-     *    The vehicle type filter uses MIMV_ODABRANI_TIPOVI_OBVEZNIKA (local MSSQL table).
+     *    The vehicle type filter uses MIMV_POSTAVKE (local MSSQL table).
      *    No EXEC AT is used, so no DTC is triggered.
      * 2. Batch INSERT the collected rows into MIMV_DETALJ locally.
      *
@@ -555,7 +575,9 @@ public class As400Repository {
         if (!(value instanceof String s)) {
             return value;
         }
-        return s.replace(", rucni,", ", ručni,") //$NON-NLS-1$ //$NON-NLS-2$
+        // DB2 pads the name with trailing blanks (fixed-length result of LEFT), so trim first
+        return s.strip()
+                .replace(", rucni,", ", ručni,") //$NON-NLS-1$ //$NON-NLS-2$
                 .replaceAll(", obicna$", ", obična"); //$NON-NLS-1$ //$NON-NLS-2$
     }
 
@@ -781,7 +803,7 @@ public class As400Repository {
                     ? "AND CASE WHEN t1.AENBET > 0 THEN t1.AENBET ELSE t1.ANLBET END = " + branch //$NON-NLS-1$
                     : ""); //$NON-NLS-1$
             if (s.directAs400()) {
-                // MIMV_ODABRANI_TIPOVI_OBVEZNIKA is a SQL Server table, not on AS400: resolve the flags here
+                // MIMV_POSTAVKE is a SQL Server table, not on AS400: resolve the flags here
                 List<String> types = fetchOdabraniTipoviObveznika();
                 sql = sql.replace("<MV02>", types.contains("MV02") ? "1 = 1" : "1 = 0"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
                 sql = sql.replace("<MV03>", types.contains("MV03") ? "1 = 1" : "1 = 0"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
@@ -793,6 +815,10 @@ public class As400Repository {
         } catch (Exception e) {
             throw new RuntimeException("Failed to load the MIMV_DETALJ select SQL", e); //$NON-NLS-1$
         }
+    }
+
+    private static String orEmpty(String s) {
+        return s != null ? s.trim() : ""; //$NON-NLS-1$
     }
 
     private static String trim(String s) {
