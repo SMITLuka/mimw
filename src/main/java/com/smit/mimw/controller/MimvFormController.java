@@ -7,6 +7,7 @@ import com.smit.mimw.dto.FormBuildResponse;
 import com.smit.mimw.dto.FormUpdateRequest;
 import com.smit.mimw.dto.IsSuccessResponse;
 import com.smit.mimw.dto.PreviewExistingResponse;
+import com.smit.mimw.dto.SettingsRequest;
 import com.smit.mimw.dto.TaxOfficesResponse;
 import com.smit.mimw.dto.TaxPayerTypeRequest;
 import com.smit.mimw.dto.TaxPayerTypesResponse;
@@ -61,6 +62,20 @@ public class MimvFormController {
 
         IsSuccessResponse response = mimvFormService.saveTaxPayerType(mandatorId, companyId, requests);
         return ResponseEntity.ok(ApiResponse.ok(response, "Taxpayer type saved successfully.")); //$NON-NLS-1$
+    }
+
+    /**
+     * POST /mimv/settings
+     * Saves the "Postavke" tab: taxpayer types, destination e-mail and customs office (MIMV_POSTAVKE).
+     */
+    @PostMapping("/settings") //$NON-NLS-1$
+    public ResponseEntity<ApiResponse<IsSuccessResponse>> saveSettings(
+            @RequestHeader("mandatorId") String mandatorId, //$NON-NLS-1$
+            @RequestHeader("companyId") String companyId, //$NON-NLS-1$
+            @RequestBody SettingsRequest request) {
+
+        IsSuccessResponse response = mimvFormService.saveSettings(mandatorId, companyId, request);
+        return ResponseEntity.ok(ApiResponse.ok(response, "Settings saved successfully.")); //$NON-NLS-1$
     }
 
     /**

@@ -78,6 +78,6 @@ public class MimvZaglavljeItem {
     /** UKUP_IZNOS_NOVA_I_RAB */
     private BigDecimal taxTotalSum;
 
-    /** Active taxpayer type codes from MIMV_ODABRANI_TIPOVI_OBVEZNIKA (MV01, MV02, MV03) */
+    /** Active taxpayer type codes from MIMV_POSTAVKE (MV01, MV02, MV03) */
     private List<String> selectedTaxPayerTypes;
 }

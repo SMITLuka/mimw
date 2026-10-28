@@ -3,7 +3,7 @@
 -- Executed directly on AS400 through JT400 (naming=sql: LIBRARY.TABLE) when the company has AS400_HOST.
 -- Same columns, joins and filters as insert_mimv_detalj.sql (linked server variant), in DB2 syntax:
 --   no [linkedServer].[catalog] prefix, COALESCE instead of ISNULL, LENGTH instead of LEN, || instead of +.
--- MIMV_ODABRANI_TIPOVI_OBVEZNIKA is a SQL Server table, so its flags are resolved in Java and passed
+-- MIMV_POSTAVKE is a SQL Server table, so its flags are resolved in Java and passed
 -- as constant conditions <MV02> / <MV03> ("1 = 1" or "1 = 0").
 -- ============================================================
 -- Placeholders replaced at runtime:

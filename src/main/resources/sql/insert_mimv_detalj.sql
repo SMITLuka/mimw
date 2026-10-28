@@ -8,7 +8,7 @@
 -- PERV uses <MAINLIBRARY> (e.g. KB0D1).
 -- MAR, PCD use <PLIBRARY> (e.g. KB0DP).
 -- KLCHCPP (brand lookup) uses hardcoded library IVASXT.
--- MIMV_ODABRANI_TIPOVI_OBVEZNIKA is a local Pantheon MSSQL table — no linked server prefix.
+-- MIMV_POSTAVKE is a local Pantheon MSSQL table — no linked server prefix.
 --
 -- All AS400 column names are uppercase throughout — MSDASQL returns column metadata in
 -- uppercase and Pantheon SQL Server uses a case-sensitive collation.
@@ -102,9 +102,9 @@ WITH vehs AS (
         AND (hfk.HFKHRTVAL <> 0 OR (t2.HBJHRTVAL IS NOT NULL AND t2.HBJHRTVAL <> 0))
         AND CASE WHEN t2.HBJHRTBAS IS NULL THEN hfk.HFKHRTBAS ELSE t2.HBJHRTBAS END > 0
         AND (
-            (hfs.HFSFZGART IN ('N', 'V') AND EXISTS (SELECT 1 FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE MV02_TRGOVAC_NOVIM = 1))
+            (hfs.HFSFZGART IN ('N', 'V') AND EXISTS (SELECT 1 FROM MIMV_POSTAVKE WHERE MV02_TRGOVAC_NOVIM = 1))
             OR
-            (hfs.HFSFZGART IN ('A', 'G') AND EXISTS (SELECT 1 FROM MIMV_ODABRANI_TIPOVI_OBVEZNIKA WHERE MV03_TRGOVAC_RABLJENIM = 1))
+            (hfs.HFSFZGART IN ('A', 'G') AND EXISTS (SELECT 1 FROM MIMV_POSTAVKE WHERE MV03_TRGOVAC_RABLJENIM = 1))
         )
         <BRANCHFILTER>
 )
