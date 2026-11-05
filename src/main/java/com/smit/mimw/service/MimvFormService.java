@@ -371,8 +371,14 @@ public class MimvFormService {
             log.info("updateForm: overwriting opened form {}", compositeId); //$NON-NLS-1$
         }
 
-        // Remember whether this version was already sent, the header row is deleted and inserted again below
+        // A form that was already sent can no longer be changed; it is corrected with a new version ("Kopiraj")
         java.time.LocalDateTime sentAt = as400Repository.fetchMimvSentAt(oib, formDate, sifobr, seqNum, versionNum);
+        if (sentAt != null)
+        {
+            throw new IllegalArgumentException("Obrazac " + compositeId + " je poslan " //$NON-NLS-1$ //$NON-NLS-2$
+                    + sentAt.format(DateTimeFormatter.ofPattern("d.M.yyyy. HH:mm")) //$NON-NLS-1$
+                    + " i ne može se mijenjati. Ispravak napravite novom verzijom (Kopiraj)."); //$NON-NLS-1$
+        }
 
         // Delete child rows first (FK constraint), then parent
         as400Repository.deleteMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);
