@@ -63,4 +63,13 @@ public class MimvProcessedItem {
 
     /** DATUM_SLANJA — when the form was sent, ISO yyyy-MM-ddTHH:mm:ss; absent when it was not sent */
     private String sentAt; //$NON-NLS-1$
+
+    /**
+     * Status of the form: {@value #STATUS_AZURIRANO} (saved, not sent yet, can be changed and deleted) or
+     * {@value #STATUS_POSLANO} (XML sent by e-mail, can only be corrected with a new version).
+     */
+    private String status; //$NON-NLS-1$
+
+    public static final String STATUS_AZURIRANO = "AZURIRANO"; //$NON-NLS-1$
+    public static final String STATUS_POSLANO   = "POSLANO"; //$NON-NLS-1$
 }
