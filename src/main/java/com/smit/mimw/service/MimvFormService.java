@@ -216,8 +216,10 @@ public class MimvFormService {
             }
         }
 
-        // Remember whether this version was already sent (only possible with rebuild=true)
-        java.time.LocalDateTime sentAt = as400Repository.fetchMimvSentAt(oib, formDateInt, sifobr, seqNum, versionNum);
+        // Remember whether this version was already sent (only possible with rebuild=true) and when it was created
+        java.time.LocalDateTime sentAt    = as400Repository.fetchMimvSentAt(oib, formDateInt, sifobr, seqNum, versionNum);
+        java.time.LocalDateTime createdAt = as400Repository.fetchMimvCreatedAt(oib, formDateInt, sifobr, seqNum, versionNum);
+        boolean existed = as400Repository.fetchMimvZaglavlje(oib, formDateInt, sifobr, seqNum, versionNum).isPresent();
 
         // 4. Delete existing detail rows first (FK child before parent)
         as400Repository.deleteMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
@@ -242,6 +244,11 @@ public class MimvFormService {
         log.info("Computed totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
         as400Repository.updateMimvZaglavljeTotals(oib, formDateInt, sifobr, seqNum, versionNum, totalNew, totalUsed);
         as400Repository.restoreMimvSentAt(oib, formDateInt, sifobr, seqNum, versionNum, sentAt);
+        if (createdAt != null || !existed)
+        {
+            // A new form gets now; an older form that never had a creation time keeps none
+            as400Repository.setMimvCreatedAt(oib, formDateInt, sifobr, seqNum, versionNum, createdAt);
+        }
 
         // 8. Fetch the just-inserted detail rows and selected taxpa/**/yer types for the response
         List<MimvDetaljItem> detalji = as400Repository.fetchMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
@@ -379,6 +386,9 @@ public class MimvFormService {
                     + sentAt.format(DateTimeFormatter.ofPattern("d.M.yyyy. HH:mm")) //$NON-NLS-1$
                     + " i ne može se mijenjati. Ispravak napravite novom verzijom (Kopiraj)."); //$NON-NLS-1$
         }
+        // Saving keeps the creation time; a new version ("Kopiraj") has none yet and gets now
+        java.time.LocalDateTime createdAt = as400Repository.fetchMimvCreatedAt(oib, formDate, sifobr, seqNum, versionNum);
+        boolean existed = as400Repository.fetchMimvZaglavlje(oib, formDate, sifobr, seqNum, versionNum).isPresent();
 
         // Delete child rows first (FK constraint), then parent
         as400Repository.deleteMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);
@@ -398,6 +408,11 @@ public class MimvFormService {
         log.info("updateForm totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
         as400Repository.updateMimvZaglavljeTotals(oib, formDate, sifobr, seqNum, versionNum, totalNew, totalUsed);
         as400Repository.restoreMimvSentAt(oib, formDate, sifobr, seqNum, versionNum, sentAt);
+        if (createdAt != null || !existed)
+        {
+            // A new version gets now; an older form that never had a creation time keeps none
+            as400Repository.setMimvCreatedAt(oib, formDate, sifobr, seqNum, versionNum, createdAt);
+        }
 
         // Fetch persisted rows for response
         List<MimvDetaljItem> savedDetalji  = as400Repository.fetchMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);

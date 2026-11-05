@@ -607,21 +607,42 @@ public class As400Repository {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
+    private static final DateTimeFormatter ISO_SECONDS = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"); //$NON-NLS-1$
+
     /**
-     * Fetches all MIMV_ZAGLAVLJE rows ordered by DATUM_PP descending.
-     * Used by GET /mimv/preview/existing.
+     * Fetches all MIMV_ZAGLAVLJE rows, newest first: forms with DATUM_KREIRANJA by that moment,
+     * then older forms without it by period and sequence/version.
+     * Used by GET /mimv/preview/existing. Works also before DATUM_KREIRANJA / DATUM_SLANJA are added
+     * to the table (then createdAt / sentAt are not returned).
      */
     public List<MimvProcessedItem> fetchAllMimvZaglavlje() {
-        String sql = "SELECT OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+        String columns = "SELECT OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
                 + " IDENTIFIKATOR, AKCIJA_PP, RAZDOBLJE_OD, RAZDOBLJE_DO," //$NON-NLS-1$
                 + " CARINSKI_URED, NAZIV_OBVEZNIKA," //$NON-NLS-1$
-                + " UKUP_IZNOS_NOVA, UKUP_IZNOS_RABLJENA, UKUP_IZNOS_NOVA_I_RAB" //$NON-NLS-1$
+                + " UKUP_IZNOS_NOVA, UKUP_IZNOS_RABLJENA, UKUP_IZNOS_NOVA_I_RAB"; //$NON-NLS-1$
+        String withDates = columns + ", DATUM_KREIRANJA, DATUM_SLANJA" //$NON-NLS-1$
                 + " FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
-                + " ORDER BY DATUM_PP DESC"; //$NON-NLS-1$
+                + " ORDER BY CASE WHEN DATUM_KREIRANJA IS NULL THEN 1 ELSE 0 END, DATUM_KREIRANJA DESC," //$NON-NLS-1$
+                + " RAZDOBLJE_OD DESC, REDNI_BROJ_PP DESC, REDNI_BROJ_PP_PROM DESC"; //$NON-NLS-1$
+        String withoutDates = columns
+                + " FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " ORDER BY RAZDOBLJE_OD DESC, REDNI_BROJ_PP DESC, REDNI_BROJ_PP_PROM DESC"; //$NON-NLS-1$
+        try {
+            return jdbcTemplate.query(withDates, (rs, rowNum) -> {
+                MimvProcessedItem item = mapProcessedItem(rs);
+                item.setCreatedAt(isoSeconds(rs.getTimestamp("DATUM_KREIRANJA"))); //$NON-NLS-1$
+                item.setSentAt(isoSeconds(rs.getTimestamp("DATUM_SLANJA"))); //$NON-NLS-1$
+                return item;
+            });
+        } catch (org.springframework.jdbc.BadSqlGrammarException e) {
+            log.warn("MIMV_ZAGLAVLJE has no DATUM_KREIRANJA / DATUM_SLANJA column, preview is returned without them: {}", //$NON-NLS-1$
+                    e.getMessage());
+            return jdbcTemplate.query(withoutDates, (rs, rowNum) -> mapProcessedItem(rs));
+        }
+    }
 
-        log.debug("fetchAllMimvZaglavlje SQL: {}", sql); //$NON-NLS-1$
-
-        return jdbcTemplate.query(sql, (rs, rowNum) -> MimvProcessedItem.builder()
+    private static MimvProcessedItem mapProcessedItem(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return MimvProcessedItem.builder()
                 .oibObveznika(trim(rs.getString("OIB_OBVEZNIKA"))) //$NON-NLS-1$
                 .sifraObrascaPP(trim(rs.getString("SIFRA_OBRASCA_PP"))) //$NON-NLS-1$
                 .redniBrojPP(nullableInt(rs, "REDNI_BROJ_PP")) //$NON-NLS-1$
@@ -635,7 +656,44 @@ public class As400Repository {
                 .ukupIznosNova(rs.getBigDecimal("UKUP_IZNOS_NOVA")) //$NON-NLS-1$
                 .ukupIznosRabljena(rs.getBigDecimal("UKUP_IZNOS_RABLJENA")) //$NON-NLS-1$
                 .ukupIznosNovaIRab(rs.getBigDecimal("UKUP_IZNOS_NOVA_I_RAB")) //$NON-NLS-1$
-                .build());
+                .build();
+    }
+
+    private static String isoSeconds(java.sql.Timestamp t) {
+        return t != null ? t.toLocalDateTime().format(ISO_SECONDS) : null;
+    }
+
+    /**
+     * Reads DATUM_KREIRANJA of one form, or null when it is not set or the column does not exist.
+     */
+    public java.time.LocalDateTime fetchMimvCreatedAt(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        try {
+            List<java.sql.Timestamp> rows = jdbcTemplate.query(
+                    "SELECT DATUM_KREIRANJA FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                    + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                    (rs, rowNum) -> rs.getTimestamp("DATUM_KREIRANJA"), //$NON-NLS-1$
+                    oib, formDate, sifobr, seqNum, versionNum);
+            return rows.isEmpty() || rows.get(0) == null ? null : rows.get(0).toLocalDateTime();
+        } catch (org.springframework.jdbc.BadSqlGrammarException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Writes DATUM_KREIRANJA: the given moment (the form already existed and is saved again) or now (a new form).
+     * Skipped with a warning when the column does not exist yet, so saving never fails because of it.
+     */
+    public void setMimvCreatedAt(String oib, int formDate, String sifobr, int seqNum, int versionNum,
+                                 java.time.LocalDateTime createdAt) {
+        java.time.LocalDateTime value = createdAt != null ? createdAt : java.time.LocalDateTime.now();
+        try {
+            jdbcTemplate.update(
+                    "UPDATE " + MIMV_ZAGLAVLJE + " SET DATUM_KREIRANJA = ?" //$NON-NLS-1$ //$NON-NLS-2$
+                    + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                    java.sql.Timestamp.valueOf(value), oib, formDate, sifobr, seqNum, versionNum);
+        } catch (org.springframework.jdbc.BadSqlGrammarException e) {
+            log.warn("MIMV_ZAGLAVLJE has no DATUM_KREIRANJA column, creation time is not stored: {}", e.getMessage()); //$NON-NLS-1$
+        }
     }
 
     // -------------------------------------------------------------------------

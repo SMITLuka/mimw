@@ -57,4 +57,10 @@ public class MimvProcessedItem {
 
     /** UKUP_IZNOS_NOVA_I_RAB */
     private BigDecimal ukupIznosNovaIRab;
+
+    /** DATUM_KREIRANJA — when the form (this version) was created, ISO yyyy-MM-ddTHH:mm:ss; absent for older forms */
+    private String createdAt; //$NON-NLS-1$
+
+    /** DATUM_SLANJA — when the form was sent, ISO yyyy-MM-ddTHH:mm:ss; absent when it was not sent */
+    private String sentAt; //$NON-NLS-1$
 }
