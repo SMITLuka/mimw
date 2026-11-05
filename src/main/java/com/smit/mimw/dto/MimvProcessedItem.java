@@ -65,11 +65,22 @@ public class MimvProcessedItem {
     private String sentAt; //$NON-NLS-1$
 
     /**
-     * Status of the form: {@value #STATUS_AZURIRANO} (saved, not sent yet, can be changed and deleted) or
-     * {@value #STATUS_POSLANO} (XML sent by e-mail, can only be corrected with a new version).
+     * Status of the form:
+     * {@value #STATUS_NOVI} (action N, not sent yet), {@value #STATUS_ISPRAVAK} (action A — a new version made
+     * with "Kopiraj" — not sent yet), {@value #STATUS_POSLANO} (XML sent by e-mail, whatever the action).
+     * NOVI and ISPRAVAK can be changed and deleted; POSLANO can only be corrected with a new version.
      */
     private String status; //$NON-NLS-1$
 
-    public static final String STATUS_AZURIRANO = "AZURIRANO"; //$NON-NLS-1$
-    public static final String STATUS_POSLANO   = "POSLANO"; //$NON-NLS-1$
+    public static final String STATUS_NOVI     = "NOVI"; //$NON-NLS-1$
+    public static final String STATUS_ISPRAVAK = "ISPRAVAK"; //$NON-NLS-1$
+    public static final String STATUS_POSLANO  = "POSLANO"; //$NON-NLS-1$
+
+    /** Status from the sent time and the action code (AKCIJA_PP). */
+    public static String statusOf(String sentAt, String action) {
+        if (sentAt != null) {
+            return STATUS_POSLANO;
+        }
+        return "A".equalsIgnoreCase(action) ? STATUS_ISPRAVAK : STATUS_NOVI; //$NON-NLS-1$
+    }
 }

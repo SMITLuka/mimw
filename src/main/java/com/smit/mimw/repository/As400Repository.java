@@ -632,13 +632,17 @@ public class As400Repository {
                 MimvProcessedItem item = mapProcessedItem(rs);
                 item.setCreatedAt(isoSeconds(rs.getTimestamp("DATUM_KREIRANJA"))); //$NON-NLS-1$
                 item.setSentAt(isoSeconds(rs.getTimestamp("DATUM_SLANJA"))); //$NON-NLS-1$
-                item.setStatus(item.getSentAt() != null ? MimvProcessedItem.STATUS_POSLANO : MimvProcessedItem.STATUS_AZURIRANO);
+                item.setStatus(MimvProcessedItem.statusOf(item.getSentAt(), item.getAction()));
                 return item;
             });
         } catch (org.springframework.jdbc.BadSqlGrammarException e) {
             log.warn("MIMV_ZAGLAVLJE has no DATUM_KREIRANJA / DATUM_SLANJA column, preview is returned without them: {}", //$NON-NLS-1$
                     e.getMessage());
-            return jdbcTemplate.query(withoutDates, (rs, rowNum) -> mapProcessedItem(rs));
+            return jdbcTemplate.query(withoutDates, (rs, rowNum) -> {
+                MimvProcessedItem item = mapProcessedItem(rs);
+                item.setStatus(MimvProcessedItem.statusOf(null, item.getAction()));
+                return item;
+            });
         }
     }
 
@@ -657,7 +661,6 @@ public class As400Repository {
                 .ukupIznosNova(rs.getBigDecimal("UKUP_IZNOS_NOVA")) //$NON-NLS-1$
                 .ukupIznosRabljena(rs.getBigDecimal("UKUP_IZNOS_RABLJENA")) //$NON-NLS-1$
                 .ukupIznosNovaIRab(rs.getBigDecimal("UKUP_IZNOS_NOVA_I_RAB")) //$NON-NLS-1$
-                .status(MimvProcessedItem.STATUS_AZURIRANO)
                 .build();
     }
 
