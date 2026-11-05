@@ -37,6 +37,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -189,7 +190,24 @@ public class MimvFormService {
         // 2. Build the identifier as IVAS does: oib-ddMMyyyy(period start)-405-seq-version
         String compositeId = MimvXmlBuilder.identifier(oib, request.getDateFrom(), seqNum, versionNum);
 
-        // 3. Delete existing detail rows first (FK child before parent)
+        // 3. A form that is already saved is returned as saved: the user's changes (mileage, OIB, added or
+        //    removed vehicles) must survive opening the form again. Only rebuild=true reads AS400 again.
+        if (!Boolean.TRUE.equals(request.getRebuild())) {
+            Optional<MimvZaglavljeItem> saved = as400Repository.fetchMimvZaglavlje(oib, formDateInt, sifobr, seqNum, versionNum);
+            if (saved.isPresent()) {
+                List<MimvDetaljItem> savedDetalji = as400Repository.fetchMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
+                MimvZaglavljeItem savedZaglavlje = saved.get();
+                savedZaglavlje.setSelectedTaxPayerTypes(as400Repository.fetchOdabraniTipoviObveznika(oib));
+                log.info("Form {} already saved, returning it with {} vehicle(s) without reading AS400", //$NON-NLS-1$
+                        savedZaglavlje.getId(), savedDetalji.size());
+                return FormBuildResponse.builder()
+                        .zaglavlje(savedZaglavlje)
+                        .detalji(savedDetalji)
+                        .build();
+            }
+        }
+
+        // 4. Delete existing detail rows first (FK child before parent)
         as400Repository.deleteMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
 
         // 4. Delete existing header row

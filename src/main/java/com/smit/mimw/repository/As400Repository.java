@@ -5,6 +5,7 @@ import com.smit.mimw.dto.CompanyData;
 import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.MimvDetaljItem;
 import com.smit.mimw.dto.MimvProcessedItem;
+import com.smit.mimw.dto.MimvZaglavljeItem;
 import com.smit.mimw.dto.TaxOffice;
 import com.smit.mimw.tenant.As400DirectPools;
 import com.smit.mimw.tenant.TenantConfigurationException;
@@ -23,6 +24,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -456,6 +458,47 @@ public class As400Repository {
                 + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
                 totalNew, totalUsed, totalAll, oib, formDate, sifobr, seqNum, versionNum);
         log.info("Updated MIMV_ZAGLAVLJE totals ({} row): totalNew={}, totalUsed={}", rows, totalNew, totalUsed); //$NON-NLS-1$
+    }
+
+    /**
+     * Reads one saved MIMV_ZAGLAVLJE row by its full key, exactly as it was last saved.
+     * Used when an existing form is opened, so the saved header (e-mail, customs office, totals) is shown
+     * instead of a fresh copy from AS400.
+     *
+     * @return the saved header, or empty when no form with this key exists
+     */
+    public Optional<MimvZaglavljeItem> fetchMimvZaglavlje(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        String sql = "SELECT OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM," //$NON-NLS-1$
+                + " IDENTIFIKATOR, AKCIJA_PP, RAZDOBLJE_OD, RAZDOBLJE_DO," //$NON-NLS-1$
+                + " CARINSKI_URED, CARINSKI_URED_OPIS, NAZIV_OBVEZNIKA, SJEDISTE_OBVEZNIKA," //$NON-NLS-1$
+                + " EMAIL_ADRESA, ODGOVORNA_OSOBA, TIPOVI_OBVEZNIKA," //$NON-NLS-1$
+                + " UKUP_IZNOS_NOVA, UKUP_IZNOS_RABLJENA, UKUP_IZNOS_NOVA_I_RAB" //$NON-NLS-1$
+                + " FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?"; //$NON-NLS-1$
+
+        List<MimvZaglavljeItem> rows = jdbcTemplate.query(sql, (rs, rowNum) -> MimvZaglavljeItem.builder()
+                .id(trim(rs.getString("IDENTIFIKATOR"))) //$NON-NLS-1$
+                .oibObveznika(trim(rs.getString("OIB_OBVEZNIKA"))) //$NON-NLS-1$
+                .datumPP(nullableInt(rs, "DATUM_PP")) //$NON-NLS-1$
+                .sifraObrascaPP(trim(rs.getString("SIFRA_OBRASCA_PP"))) //$NON-NLS-1$
+                .redniBrojPP(nullableInt(rs, "REDNI_BROJ_PP")) //$NON-NLS-1$
+                .redniBrojPPProm(nullableInt(rs, "REDNI_BROJ_PP_PROM")) //$NON-NLS-1$
+                .actionCode(trim(rs.getString("AKCIJA_PP"))) //$NON-NLS-1$
+                .dateFrom(toLocalDate(nullableInt(rs, "RAZDOBLJE_OD"))) //$NON-NLS-1$
+                .dateTo(toLocalDate(nullableInt(rs, "RAZDOBLJE_DO"))) //$NON-NLS-1$
+                .taxOfficeCode(trim(rs.getString("CARINSKI_URED"))) //$NON-NLS-1$
+                .taxOfficeDescription(trim(rs.getString("CARINSKI_URED_OPIS"))) //$NON-NLS-1$
+                .companyDescription(trim(rs.getString("NAZIV_OBVEZNIKA"))) //$NON-NLS-1$
+                .companySeat(trim(rs.getString("SJEDISTE_OBVEZNIKA"))) //$NON-NLS-1$
+                .destinationEmail(trim(rs.getString("EMAIL_ADRESA"))) //$NON-NLS-1$
+                .responsiblePerson(trim(rs.getString("ODGOVORNA_OSOBA"))) //$NON-NLS-1$
+                .taxPayerCode(trim(rs.getString("TIPOVI_OBVEZNIKA"))) //$NON-NLS-1$
+                .taxNewVehiclesSum(rs.getBigDecimal("UKUP_IZNOS_NOVA")) //$NON-NLS-1$
+                .taxUsedVehiclesSum(rs.getBigDecimal("UKUP_IZNOS_RABLJENA")) //$NON-NLS-1$
+                .taxTotalSum(rs.getBigDecimal("UKUP_IZNOS_NOVA_I_RAB")) //$NON-NLS-1$
+                .build(),
+                oib, formDate, sifobr, seqNum, versionNum);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
     /**

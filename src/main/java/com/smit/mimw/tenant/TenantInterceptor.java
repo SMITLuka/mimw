@@ -24,8 +24,8 @@ public class TenantInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         TenantContext.clear();
-        String mandatorId = request.getHeader(MANDATOR_HEADER);
-        String companyId = request.getHeader(COMPANY_HEADER);
+        String mandatorId = decode(request.getHeader(MANDATOR_HEADER));
+        String companyId = decode(request.getHeader(COMPANY_HEADER));
         if (provider.isHubEnabled()) {
             if (isBlank(mandatorId) || isBlank(companyId)) {
                 // Leave the context empty; the controller rejects the missing header itself.
@@ -41,6 +41,22 @@ public class TenantInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         TenantContext.clear();
+    }
+
+    /**
+     * Ares sends mandatorId / companyId percent-encoded (UTF-8), because a Pantheon company key can be a
+     * name with Croatian letters and spaces (e.g. "AUTO KUĆA HABULIN d.o.o."), which the HTTP firewall
+     * rejects in a raw header. Plain codes such as "000002" are not changed by decoding.
+     */
+    static String decode(String value) {
+        if (value == null || value.indexOf('%') < 0) {
+            return value;
+        }
+        try {
+            return java.net.URLDecoder.decode(value.replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8); //$NON-NLS-1$ //$NON-NLS-2$
+        } catch (IllegalArgumentException e) {
+            return value;
+        }
     }
 
     private static boolean isBlank(String value) {
