@@ -468,6 +468,31 @@ public class As400Repository {
     }
 
     /**
+     * Key of the saved form with the given IDENTIFIKATOR (sentAt is not read), or empty when it does not exist.
+     */
+    public Optional<SavedFormKey> findMimvKeyByIdentifier(String identificator) {
+        if (identificator == null || identificator.isBlank()) {
+            return Optional.empty();
+        }
+        List<SavedFormKey> rows = jdbcTemplate.query(
+                "SELECT OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM" //$NON-NLS-1$
+                + " FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " WHERE IDENTIFIKATOR = ?", //$NON-NLS-1$
+                (rs, rowNum) -> new SavedFormKey(
+                        trim(rs.getString("OIB_OBVEZNIKA")), //$NON-NLS-1$
+                        rs.getInt("DATUM_PP"), //$NON-NLS-1$
+                        trim(rs.getString("SIFRA_OBRASCA_PP")), //$NON-NLS-1$
+                        rs.getInt("REDNI_BROJ_PP"), //$NON-NLS-1$
+                        rs.getInt("REDNI_BROJ_PP_PROM"), //$NON-NLS-1$
+                        null),
+                identificator.trim());
+        if (rows.size() > 1) {
+            log.warn("{} MIMV_ZAGLAVLJE rows have identificator={}, using the first one", rows.size(), identificator); //$NON-NLS-1$
+        }
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
+    /**
      * Finds the saved form(s) with the given IDENTIFIKATOR.
      *
      * @throws IllegalStateException when the DATUM_SLANJA column has not been added to MIMV_ZAGLAVLJE yet

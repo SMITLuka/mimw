@@ -166,8 +166,15 @@ public class MimvFormService {
      * </ol>
      */
     public FormBuildResponse buildForm(String mandatorId, String companyId, FormBuildRequest request) {
-        log.info("buildForm: mandatorId={}, companyId={}, taxPayerCode={}, dateFrom={}, dateTo={}", //$NON-NLS-1$
-                mandatorId, companyId, request.getTaxPayerCode(), request.getDateFrom(), request.getDateTo());
+        log.info("buildForm: mandatorId={}, companyId={}, taxPayerCode={}, dateFrom={}, dateTo={}, identificator={}", //$NON-NLS-1$
+                mandatorId, companyId, request.getTaxPayerCode(), request.getDateFrom(), request.getDateTo(),
+                request.getIdentificator());
+
+        // 0. An existing form is opened by its identifier: exactly that saved form is returned, whatever
+        //    format its identifier has. Nothing is built from AS400, so opening a form never creates a new one.
+        if (request.getIdentificator() != null && !request.getIdentificator().isBlank()) {
+            return loadSavedForm(request.getIdentificator().trim());
+        }
 
         // 1. Resolve OIB, company data, and form type code
         String oib = as400Repository.fetchOib();
@@ -272,6 +279,30 @@ public class MimvFormService {
                 .build();
     }
 
+    /**
+     * Returns the saved form with this IDENTIFIKATOR exactly as it is stored.
+     *
+     * @throws ResourceNotFoundException when no form has this identifier
+     */
+    private FormBuildResponse loadSavedForm(String identificator) {
+        As400Repository.SavedFormKey key = as400Repository.findMimvKeyByIdentifier(identificator)
+                .orElseThrow(() -> new ResourceNotFoundException("Obrazac " + identificator //$NON-NLS-1$
+                        + " ne postoji. Osvježite popis obrazaca.")); //$NON-NLS-1$
+
+        MimvZaglavljeItem zaglavlje = as400Repository
+                .fetchMimvZaglavlje(key.oib(), key.formDate(), key.sifobr(), key.seqNum(), key.versionNum())
+                .orElseThrow(() -> new ResourceNotFoundException("Obrazac " + identificator + " ne postoji.")); //$NON-NLS-1$ //$NON-NLS-2$
+        List<MimvDetaljItem> detalji = as400Repository
+                .fetchMimvDetalj(key.oib(), key.formDate(), key.sifobr(), key.seqNum(), key.versionNum());
+        zaglavlje.setSelectedTaxPayerTypes(as400Repository.fetchOdabraniTipoviObveznika());
+
+        log.info("Opened saved form {} with {} vehicle(s)", identificator, detalji.size()); //$NON-NLS-1$
+        return FormBuildResponse.builder()
+                .zaglavlje(zaglavlje)
+                .detalji(detalji)
+                .build();
+    }
+
     // -------------------------------------------------------------------------
     // Preview existing — GET /mimv/preview/existing
     // -------------------------------------------------------------------------
@@ -327,6 +358,18 @@ public class MimvFormService {
                 formDate, d.getTaxPayerCode(), sifobr, seqNum, versionNum);
 
         String compositeId = MimvXmlBuilder.identifier(oib, z != null ? z.getDateFrom() : null, seqNum, versionNum);
+
+        // The opened form is overwritten in place under its own key, also when its identifier is in an older
+        // format (another DATUM_PP / SIFRA_OBRASCA_PP). A new version ("Kopiraj") has another version number
+        // and is saved under the computed key, so the original is never overwritten.
+        As400Repository.SavedFormKey opened = as400Repository.findMimvKeyByIdentifier(d.getIdentificator()).orElse(null);
+        if (opened != null && opened.seqNum() == seqNum && opened.versionNum() == versionNum) {
+            oib         = opened.oib();
+            formDate    = opened.formDate();
+            sifobr      = opened.sifobr();
+            compositeId = d.getIdentificator().trim();
+            log.info("updateForm: overwriting opened form {}", compositeId); //$NON-NLS-1$
+        }
 
         // Remember whether this version was already sent, the header row is deleted and inserted again below
         java.time.LocalDateTime sentAt = as400Repository.fetchMimvSentAt(oib, formDate, sifobr, seqNum, versionNum);
@@ -498,8 +541,16 @@ public class MimvFormService {
         log.info("confirmForm: XML sent to {}", email); //$NON-NLS-1$
 
         // Remember that this version was sent: a sent form can no longer be deleted
-        int formDate = Integer.parseInt(z.getDateFrom().format(YYYYMMDD));
-        as400Repository.markMimvZaglavljeSent(oib, formDate, toSifobr(data.getTaxPayerCode()), seqNum, verNum);
+        As400Repository.SavedFormKey opened = as400Repository.findMimvKeyByIdentifier(data.getIdentificator()).orElse(null);
+        if (opened != null && opened.seqNum() == seqNum && opened.versionNum() == verNum)
+        {
+            as400Repository.markMimvZaglavljeSent(opened.oib(), opened.formDate(), opened.sifobr(), seqNum, verNum);
+        }
+        else
+        {
+            int formDate = Integer.parseInt(z.getDateFrom().format(YYYYMMDD));
+            as400Repository.markMimvZaglavljeSent(oib, formDate, toSifobr(data.getTaxPayerCode()), seqNum, verNum);
+        }
         return email;
     }
 

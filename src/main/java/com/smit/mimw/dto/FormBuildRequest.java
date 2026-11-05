@@ -56,4 +56,10 @@ public class FormBuildRequest {
      * Set to true to throw the saved form away and build it again from AS400.
      */
     private Boolean rebuild;
+
+    /**
+     * IDENTIFIKATOR of a saved form. When set, exactly that form is returned from MIMV_ZAGLAVLJE /
+     * MIMV_DETALJ (also a form in an older identifier format) and AS400 is not read; 404 when it does not exist.
+     */
+    private String identificator; //$NON-NLS-1$
 }
