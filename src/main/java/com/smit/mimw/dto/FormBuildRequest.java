@@ -50,4 +50,10 @@ public class FormBuildRequest {
 
     /** ODGOVORNA_OSOBA — responsible person name */
     private String responsiblePerson; //$NON-NLS-1$
+
+    /**
+     * When the form with this key is already saved, it is returned as saved and AS400 is not read.
+     * Set to true to throw the saved form away and build it again from AS400.
+     */
+    private Boolean rebuild;
 }
