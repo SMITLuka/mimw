@@ -461,6 +461,87 @@ public class As400Repository {
     }
 
     /**
+     * Key of a saved form and the moment it was sent (null when it was never sent).
+     */
+    public record SavedFormKey(String oib, int formDate, String sifobr, int seqNum, int versionNum,
+                               java.time.LocalDateTime sentAt) {
+    }
+
+    /**
+     * Finds the saved form(s) with the given IDENTIFIKATOR.
+     *
+     * @throws IllegalStateException when the DATUM_SLANJA column has not been added to MIMV_ZAGLAVLJE yet
+     */
+    public List<SavedFormKey> findMimvZaglavljeByIdentifier(String identificator) {
+        String sql = "SELECT OIB_OBVEZNIKA, DATUM_PP, SIFRA_OBRASCA_PP, REDNI_BROJ_PP, REDNI_BROJ_PP_PROM, DATUM_SLANJA" //$NON-NLS-1$
+                + " FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                + " WHERE IDENTIFIKATOR = ?"; //$NON-NLS-1$
+        try {
+            return jdbcTemplate.query(sql, (rs, rowNum) -> {
+                java.sql.Timestamp sent = rs.getTimestamp("DATUM_SLANJA"); //$NON-NLS-1$
+                return new SavedFormKey(
+                        trim(rs.getString("OIB_OBVEZNIKA")), //$NON-NLS-1$
+                        rs.getInt("DATUM_PP"), //$NON-NLS-1$
+                        trim(rs.getString("SIFRA_OBRASCA_PP")), //$NON-NLS-1$
+                        rs.getInt("REDNI_BROJ_PP"), //$NON-NLS-1$
+                        rs.getInt("REDNI_BROJ_PP_PROM"), //$NON-NLS-1$
+                        sent != null ? sent.toLocalDateTime() : null);
+            }, identificator);
+        } catch (org.springframework.jdbc.BadSqlGrammarException e) {
+            throw new IllegalStateException("Tablica " + MIMV_ZAGLAVLJE + " nema kolonu DATUM_SLANJA." //$NON-NLS-1$ //$NON-NLS-2$
+                    + " Pokrenite: ALTER TABLE dbo.MIMV_ZAGLAVLJE ADD DATUM_SLANJA datetime NULL", e); //$NON-NLS-1$
+        }
+    }
+
+    /**
+     * Stores when the form was sent. Returns false (and logs) when the DATUM_SLANJA column does not exist yet,
+     * so sending never fails because of it.
+     */
+    public boolean markMimvZaglavljeSent(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        try {
+            int rows = jdbcTemplate.update(
+                    "UPDATE " + MIMV_ZAGLAVLJE + " SET DATUM_SLANJA = GETDATE()" //$NON-NLS-1$ //$NON-NLS-2$
+                    + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                    oib, formDate, sifobr, seqNum, versionNum);
+            log.info("Marked {} MIMV_ZAGLAVLJE row(s) as sent, formDate={}, seq={}, ver={}", rows, formDate, seqNum, versionNum); //$NON-NLS-1$
+            return rows > 0;
+        } catch (org.springframework.jdbc.BadSqlGrammarException e) {
+            log.warn("MIMV_ZAGLAVLJE has no DATUM_SLANJA column, the form is not marked as sent: {}", e.getMessage()); //$NON-NLS-1$
+            return false;
+        }
+    }
+
+    /**
+     * Reads DATUM_SLANJA of one form, or null when it was never sent or the column does not exist.
+     */
+    public java.time.LocalDateTime fetchMimvSentAt(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        try {
+            List<java.sql.Timestamp> rows = jdbcTemplate.query(
+                    "SELECT DATUM_SLANJA FROM " + MIMV_ZAGLAVLJE //$NON-NLS-1$
+                    + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                    (rs, rowNum) -> rs.getTimestamp("DATUM_SLANJA"), //$NON-NLS-1$
+                    oib, formDate, sifobr, seqNum, versionNum);
+            return rows.isEmpty() || rows.get(0) == null ? null : rows.get(0).toLocalDateTime();
+        } catch (org.springframework.jdbc.BadSqlGrammarException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Writes DATUM_SLANJA back after a form was saved again, so saving does not forget that it was sent.
+     */
+    public void restoreMimvSentAt(String oib, int formDate, String sifobr, int seqNum, int versionNum,
+                                  java.time.LocalDateTime sentAt) {
+        if (sentAt == null) {
+            return;
+        }
+        jdbcTemplate.update(
+                "UPDATE " + MIMV_ZAGLAVLJE + " SET DATUM_SLANJA = ?" //$NON-NLS-1$ //$NON-NLS-2$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                java.sql.Timestamp.valueOf(sentAt), oib, formDate, sifobr, seqNum, versionNum);
+    }
+
+    /**
      * Reads one saved MIMV_ZAGLAVLJE row by its full key, exactly as it was last saved.
      * Used when an existing form is opened, so the saved header (e-mail, customs office, totals) is shown
      * instead of a fresh copy from AS400.

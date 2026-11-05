@@ -5,6 +5,7 @@ import com.smit.mimw.dto.BrandsResponse;
 import com.smit.mimw.dto.CompanyData;
 import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.FormBuildResponse;
+import com.smit.mimw.dto.FormDeleteRequest;
 import com.smit.mimw.dto.FormUpdateData;
 import com.smit.mimw.dto.FormUpdateRequest;
 import com.smit.mimw.dto.ZaglavljeUpdateData;
@@ -19,6 +20,7 @@ import com.smit.mimw.dto.TaxOfficesResponse;
 import com.smit.mimw.dto.TaxPayerType;
 import com.smit.mimw.dto.TaxPayerTypeRequest;
 import com.smit.mimw.dto.TaxPayerTypesResponse;
+import com.smit.mimw.exception.ResourceNotFoundException;
 import com.smit.mimw.repository.As400Repository;
 import com.smit.mimw.util.MimvXmlBuilder;
 import jakarta.mail.internet.MimeMessage;
@@ -207,6 +209,9 @@ public class MimvFormService {
             }
         }
 
+        // Remember whether this version was already sent (only possible with rebuild=true)
+        java.time.LocalDateTime sentAt = as400Repository.fetchMimvSentAt(oib, formDateInt, sifobr, seqNum, versionNum);
+
         // 4. Delete existing detail rows first (FK child before parent)
         as400Repository.deleteMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
 
@@ -229,6 +234,7 @@ public class MimvFormService {
         BigDecimal totalUsed = totals[1];
         log.info("Computed totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
         as400Repository.updateMimvZaglavljeTotals(oib, formDateInt, sifobr, seqNum, versionNum, totalNew, totalUsed);
+        as400Repository.restoreMimvSentAt(oib, formDateInt, sifobr, seqNum, versionNum, sentAt);
 
         // 8. Fetch the just-inserted detail rows and selected taxpa/**/yer types for the response
         List<MimvDetaljItem> detalji = as400Repository.fetchMimvDetalj(oib, formDateInt, sifobr, seqNum, versionNum);
@@ -322,6 +328,9 @@ public class MimvFormService {
 
         String compositeId = MimvXmlBuilder.identifier(oib, z != null ? z.getDateFrom() : null, seqNum, versionNum);
 
+        // Remember whether this version was already sent, the header row is deleted and inserted again below
+        java.time.LocalDateTime sentAt = as400Repository.fetchMimvSentAt(oib, formDate, sifobr, seqNum, versionNum);
+
         // Delete child rows first (FK constraint), then parent
         as400Repository.deleteMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);
         as400Repository.deleteMimvZaglavlje(oib, formDate, sifobr, seqNum, versionNum);
@@ -339,6 +348,7 @@ public class MimvFormService {
         BigDecimal totalUsed = totals[1];
         log.info("updateForm totals: nova={}, rabljena={}", totalNew, totalUsed); //$NON-NLS-1$
         as400Repository.updateMimvZaglavljeTotals(oib, formDate, sifobr, seqNum, versionNum, totalNew, totalUsed);
+        as400Repository.restoreMimvSentAt(oib, formDate, sifobr, seqNum, versionNum, sentAt);
 
         // Fetch persisted rows for response
         List<MimvDetaljItem> savedDetalji  = as400Repository.fetchMimvDetalj(oib, formDate, sifobr, seqNum, versionNum);
@@ -486,7 +496,57 @@ public class MimvFormService {
         sendXmlEmail(email, xmlContent, filename, z);
 
         log.info("confirmForm: XML sent to {}", email); //$NON-NLS-1$
+
+        // Remember that this version was sent: a sent form can no longer be deleted
+        int formDate = Integer.parseInt(z.getDateFrom().format(YYYYMMDD));
+        as400Repository.markMimvZaglavljeSent(oib, formDate, toSifobr(data.getTaxPayerCode()), seqNum, verNum);
         return email;
+    }
+
+    // -------------------------------------------------------------------------
+    // Form delete — POST /mimv/form/delete
+    // -------------------------------------------------------------------------
+
+    /**
+     * Deletes a saved form (header and all vehicles). Only a form that was never sent can be deleted;
+     * a sent form has to be corrected with a new version ("Kopiraj").
+     *
+     * @return the deleted identifier
+     * @throws ResourceNotFoundException when no form has this identifier
+     * @throws IllegalArgumentException  when the identifier is empty or the form was already sent
+     */
+    public String deleteForm(String mandatorId, String companyId, FormDeleteRequest request)
+    {
+        String identificator = request != null && request.getIdentificator() != null ? request.getIdentificator().trim() : ""; //$NON-NLS-1$
+        log.info("deleteForm: mandatorId={}, companyId={}, identificator={}", mandatorId, companyId, identificator); //$NON-NLS-1$
+        if (identificator.isEmpty())
+        {
+            throw new IllegalArgumentException("Identifikator obrasca nije poslan."); //$NON-NLS-1$
+        }
+
+        List<As400Repository.SavedFormKey> forms = as400Repository.findMimvZaglavljeByIdentifier(identificator);
+        if (forms.isEmpty())
+        {
+            throw new ResourceNotFoundException("Obrazac " + identificator + " ne postoji."); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+
+        for (As400Repository.SavedFormKey f : forms)
+        {
+            if (f.sentAt() != null)
+            {
+                throw new IllegalArgumentException("Obrazac " + identificator + " je poslan " //$NON-NLS-1$ //$NON-NLS-2$
+                        + f.sentAt().format(DateTimeFormatter.ofPattern("d.M.yyyy. HH:mm")) //$NON-NLS-1$
+                        + " i ne može se obrisati. Ispravak napravite novom verzijom (Kopiraj)."); //$NON-NLS-1$
+            }
+        }
+
+        for (As400Repository.SavedFormKey f : forms)
+        {
+            as400Repository.deleteMimvDetalj(f.oib(), f.formDate(), f.sifobr(), f.seqNum(), f.versionNum());
+            as400Repository.deleteMimvZaglavlje(f.oib(), f.formDate(), f.sifobr(), f.seqNum(), f.versionNum());
+        }
+        log.info("deleteForm: deleted {} form(s) with identificator={}", forms.size(), identificator); //$NON-NLS-1$
+        return identificator;
     }
 
     private List<String> collectZaglavljeErrors(ZaglavljeUpdateData z, FormUpdateData data)

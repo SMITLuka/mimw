@@ -5,6 +5,7 @@ import com.smit.mimw.dto.BrandsResponse;
 import com.smit.mimw.dto.FormBuildRequest;
 import com.smit.mimw.dto.FormBuildResponse;
 import com.smit.mimw.dto.FormUpdateRequest;
+import com.smit.mimw.dto.FormDeleteRequest;
 import com.smit.mimw.dto.IsSuccessResponse;
 import com.smit.mimw.dto.PreviewExistingResponse;
 import com.smit.mimw.dto.SettingsRequest;
@@ -151,6 +152,21 @@ public class MimvFormController {
         String email = mimvFormService.confirmForm(mandatorId, companyId, request);
         String msg   = "Obrazac Uspješno poslan na " + email + "!"; //$NON-NLS-1$ //$NON-NLS-2$
         return ResponseEntity.status(HttpStatus.OK).body(ApiResponse.ok(null, msg));
+    }
+
+    /**
+     * POST /mimv/form/delete
+     * Deletes a saved form that was never sent. Body: {"identificator": "..."}.
+     * Returns 404 when the form does not exist and 400 when it was already sent.
+     */
+    @PostMapping("/form/delete") //$NON-NLS-1$
+    public ResponseEntity<ApiResponse<Void>> deleteForm(
+            @RequestHeader("mandatorId") String mandatorId, //$NON-NLS-1$
+            @RequestHeader("companyId") String companyId, //$NON-NLS-1$
+            @RequestBody FormDeleteRequest request)
+    {
+        String identificator = mimvFormService.deleteForm(mandatorId, companyId, request);
+        return ResponseEntity.ok(ApiResponse.ok(null, "Obrazac " + identificator + " je obrisan.")); //$NON-NLS-1$ //$NON-NLS-2$
     }
 
     /**
