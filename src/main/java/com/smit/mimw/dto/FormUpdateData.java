@@ -42,4 +42,11 @@ public class FormUpdateData
 
     /** Full replacement list of vehicle detail rows for MIMV_DETALJ. */
     private List<MimvDetaljItem> detalji;
+
+    /**
+     * IDENTIFIKATOR of the opened form. When a saved form with this identifier has the same sequential
+     * and version number, that form is overwritten in place under its own key (also an older format).
+     * Empty for a new version ("Kopiraj").
+     */
+    private String identificator;
 }
