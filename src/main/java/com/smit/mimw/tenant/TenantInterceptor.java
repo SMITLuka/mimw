@@ -44,16 +44,19 @@ public class TenantInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * Ares sends mandatorId / companyId percent-encoded (UTF-8), because a Pantheon company key can be a
+     * Ares sends mandatorId / companyId encoded as UTF-8 bytes, because a Pantheon company key can be a
      * name with Croatian letters and spaces (e.g. "AUTO KUĆA HABULIN d.o.o."), which the HTTP firewall
-     * rejects in a raw header. Plain codes such as "000002" are not changed by decoding.
+     * rejects in a raw header. Each byte is written as {@code ~XX} (e.g. "AUTO~20KU~C4~86A~20HABULIN~20d.o.o.");
+     * '~' is used instead of '%' because the '%' signs were lost on the way from Ares.
+     * The older {@code %XX} form is still accepted. Plain codes such as "000002" are not changed.
      */
     static String decode(String value) {
-        if (value == null || value.indexOf('%') < 0) {
+        if (value == null || (value.indexOf('%') < 0 && value.indexOf('~') < 0)) {
             return value;
         }
         try {
-            return java.net.URLDecoder.decode(value.replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8); //$NON-NLS-1$ //$NON-NLS-2$
+            String percent = value.replace("+", "%2B").replace('~', '%'); //$NON-NLS-1$ //$NON-NLS-2$
+            return java.net.URLDecoder.decode(percent, java.nio.charset.StandardCharsets.UTF_8);
         } catch (IllegalArgumentException e) {
             return value;
         }
