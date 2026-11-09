@@ -110,7 +110,9 @@ SELECT
     COALESCE(CHYSAA, '')                                                                            AS MARKA_VOZILA,
     LEFT(TRIM(LEFT(naziv, CASE WHEN nazlen > 0 THEN nazlen ELSE 0 END)) || ', ' || dodatak, 50)     AS TIP_VARIJANTA_TRG_NAZIV,
     TRIM(SUBSTRING(HFSFGST, 4, 17))                                                                 AS VIN_OZNAKA,
-    CASE WHEN UPPER(HFSTRB) = 'N' THEN 'D' ELSE HFSTRB END                                         AS VRSTA_GORIVA,
+    CASE WHEN TRIM(COALESCE(HFSTRB, '')) = '' THEN ''
+         WHEN UPPER(TRIM(HFSTRB)) IN ('N', 'D') THEN 'D'
+         ELSE 'B' END                                                                         AS VRSTA_GORIVA,  -- MI-MV: samo D ili B (M, H ... -> B)
     HFSZULDAT                                                                                       AS DATUM_PRVE_REGISTRACIJE,
     HFSCO2                                                                                          AS PROSJ_EMISIJA_CO2,
     razina_emisije                                                                                  AS RAZINA_EMISIJE,
