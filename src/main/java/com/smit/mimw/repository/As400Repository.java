@@ -845,7 +845,7 @@ public class As400Repository {
                 .markaVozila(trim(rs.getString("MARKA_VOZILA"))) //$NON-NLS-1$
                 .tipVarijantaTrgNaziv(trim(rs.getString("TIP_VARIJANTA_TRG_NAZIV"))) //$NON-NLS-1$
                 .vinOznaka(trim(rs.getString("VIN_OZNAKA"))) //$NON-NLS-1$
-                .vrstaGoriva(trim(rs.getString("VRSTA_GORIVA"))) //$NON-NLS-1$
+                .vrstaGoriva(normalizeFuel(rs.getString("VRSTA_GORIVA"))) //$NON-NLS-1$
                 .datumPrveRegistracije(nullableInt(rs, "DATUM_PRVE_REGISTRACIJE")) //$NON-NLS-1$
                 .prosjEmisijaCO2(rs.getBigDecimal("PROSJ_EMISIJA_CO2")) //$NON-NLS-1$
                 .razinaEmisije(trim(rs.getString("RAZINA_EMISIJE"))) //$NON-NLS-1$
@@ -955,7 +955,7 @@ public class As400Repository {
                 oib, formDate, sifobr, seqNum, versionNum,
                 item.getSifraVozila(), item.getStatusVozila(), item.getVrstaVozila(),
                 item.getMarkaVozila(), item.getTipVarijantaTrgNaziv(), item.getVinOznaka(),
-                item.getVrstaGoriva(), item.getDatumPrveRegistracije(), item.getProsjEmisijaCO2(),
+                normalizeFuel(item.getVrstaGoriva()), item.getDatumPrveRegistracije(), item.getProsjEmisijaCO2(),
                 item.getRazinaEmisije(), item.getRadniObujamMotora(), item.getSnagaMotora(),
                 item.getProdajnaCijena(), item.getBrojPrijedjenihKm(), item.getKamper(),
                 item.getPlugIn(), item.getVozilo71(), item.getVozilo81(),
@@ -1031,6 +1031,19 @@ public class As400Repository {
 
     private static String orEmpty(String s) {
         return s != null ? s.trim() : ""; //$NON-NLS-1$
+    }
+
+    /**
+     * Fuel type as the MI-MV form allows it: only D (diesel) or B (petrol). AS400 writes diesel as N or D;
+     * every other code (M, H, ...) is written as B. An empty value stays empty (fuel is not required for
+     * every vehicle).
+     */
+    static String normalizeFuel(String fuel) {
+        String f = fuel != null ? fuel.trim().toUpperCase(java.util.Locale.ROOT) : ""; //$NON-NLS-1$
+        if (f.isEmpty()) {
+            return f;
+        }
+        return "N".equals(f) || "D".equals(f) ? "D" : "B"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
     }
 
     private static String trim(String s) {
