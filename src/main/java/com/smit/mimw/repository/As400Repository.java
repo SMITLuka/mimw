@@ -965,14 +965,14 @@ public class As400Repository {
 
         List<Object[]> rows = items.stream().map(item -> new Object[]{
                 oib, formDate, sifobr, seqNum, versionNum,
-                item.getSifraVozila(), item.getStatusVozila(), item.getVrstaVozila(),
-                item.getMarkaVozila(), item.getTipVarijantaTrgNaziv(), item.getVinOznaka(),
+                blankToNull(item.getSifraVozila()), blankToNull(item.getStatusVozila()), blankToNull(item.getVrstaVozila()),
+                blankToNull(item.getMarkaVozila()), blankToNull(item.getTipVarijantaTrgNaziv()), blankToNull(item.getVinOznaka()),
                 normalizeFuel(item.getVrstaGoriva()), item.getDatumPrveRegistracije(), item.getProsjEmisijaCO2(),
-                item.getRazinaEmisije(), item.getRadniObujamMotora(), item.getSnagaMotora(),
-                item.getProdajnaCijena(), item.getBrojPrijedjenihKm(), item.getKamper(),
-                item.getPlugIn(), item.getVozilo71(), item.getVozilo81(),
-                item.getTestnoVozilo(), item.getDeprecijacija(), item.getPorezniObveznik(),
-                item.getOib(), item.getBrojRacuna(), item.getDatumIzdavanjaRacuna(),
+                blankToNull(item.getRazinaEmisije()), item.getRadniObujamMotora(), item.getSnagaMotora(),
+                item.getProdajnaCijena(), item.getBrojPrijedjenihKm(), blankToNull(item.getKamper()),
+                item.getPlugIn(), blankToNull(item.getVozilo71()), blankToNull(item.getVozilo81()),
+                item.getTestnoVozilo(), item.getDeprecijacija(), blankToNull(item.getPorezniObveznik()),
+                blankToNull(item.getOib()), blankToNull(item.getBrojRacuna()), item.getDatumIzdavanjaRacuna(),
                 item.getObracunatiIznosPP()
         }).collect(Collectors.toList());
 
@@ -1050,6 +1050,14 @@ public class As400Repository {
      * every other code (M, H, ...) is written as B. An empty value stays empty (fuel is not required for
      * every vehicle).
      */
+    /**
+     * An empty text from Ares is stored as NULL: SQL Server cannot convert '' into a numeric column
+     * (e.g. SIFRA_VOZILA of a vehicle added by hand without a code: "Error converting data type nvarchar to numeric").
+     */
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
+    }
+
     static String normalizeFuel(String fuel) {
         String f = fuel != null ? fuel.trim().toUpperCase(java.util.Locale.ROOT) : ""; //$NON-NLS-1$
         if (f.isEmpty()) {

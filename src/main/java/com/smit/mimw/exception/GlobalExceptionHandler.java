@@ -37,6 +37,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({SQLException.class, DataAccessException.class})
     public ResponseEntity<ApiResponse<Void>> handleDatabaseError(Exception ex) {
         log.error("Database connection error: {}", ex.getMessage(), ex);
+
+        // The database refused the data (wrong type, missing value, duplicate key, too long text):
+        // that is not a connection problem, so say what was refused.
+        String dataError = dataErrorOf(ex);
+        if (dataError != null) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error("Baza je odbila podatke obrasca: " + dataError
+                            + " Provjerite vozila (npr. šifra vozila mora biti broj) i pokušajte ponovno."));
+        }
+
         String message = "Greška u povezivanju sa bazom podataka. Provjerite mrežnu konfiguraciju.";
         
         if (ex.getMessage() != null && ex.getMessage().contains("timed out")) {
@@ -46,6 +57,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(message));
+    }
+
+    /** Message of the SQL error when the database refused the data itself, otherwise null. */
+    private static String dataErrorOf(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            String m = t.getMessage();
+            if (m == null) {
+                continue;
+            }
+            String l = m.toLowerCase(java.util.Locale.ROOT);
+            if (l.contains("error converting") || l.contains("conversion failed")
+                    || l.contains("cannot insert the value null") || l.contains("constraint")
+                    || l.contains("duplicate key") || l.contains("truncated")) {
+                return m;
+            }
+        }
+        return null;
     }
 
     @ExceptionHandler(TenantConfigurationException.class)
