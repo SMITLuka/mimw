@@ -170,6 +170,21 @@ public class MimvFormController {
     }
 
     /**
+     * POST /mimv/form/unsend
+     * Puts a sent form back in work (clears DATUM_SLANJA). Body: {"identificator": "..."}.
+     * Returns 404 when the form does not exist and 400 when it was not sent.
+     */
+    @PostMapping("/form/unsend") //$NON-NLS-1$
+    public ResponseEntity<ApiResponse<Void>> unsendForm(
+            @RequestHeader("mandatorId") String mandatorId, //$NON-NLS-1$
+            @RequestHeader("companyId") String companyId, //$NON-NLS-1$
+            @RequestBody FormDeleteRequest request)
+    {
+        String identificator = mimvFormService.unsendForm(mandatorId, companyId, request);
+        return ResponseEntity.ok(ApiResponse.ok(null, "Obrazac " + identificator + " je vraćen u izradu.")); //$NON-NLS-1$ //$NON-NLS-2$
+    }
+
+    /**
      * GET /mimv/tax/offices
      * Returns all customs/tax offices from AS400.
      */

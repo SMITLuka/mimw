@@ -555,6 +555,18 @@ public class As400Repository {
     /**
      * Writes DATUM_SLANJA back after a form was saved again, so saving does not forget that it was sent.
      */
+    /**
+     * Clears DATUM_SLANJA: the form is back in work (status NOVI / ISPRAVAK) and can be changed again.
+     *
+     * @return number of updated rows
+     */
+    public int clearMimvSentAt(String oib, int formDate, String sifobr, int seqNum, int versionNum) {
+        return jdbcTemplate.update(
+                "UPDATE " + MIMV_ZAGLAVLJE + " SET DATUM_SLANJA = NULL" //$NON-NLS-1$ //$NON-NLS-2$
+                + " WHERE OIB_OBVEZNIKA = ? AND DATUM_PP = ? AND SIFRA_OBRASCA_PP = ? AND REDNI_BROJ_PP = ? AND REDNI_BROJ_PP_PROM = ?", //$NON-NLS-1$
+                oib, formDate, sifobr, seqNum, versionNum);
+    }
+
     public void restoreMimvSentAt(String oib, int formDate, String sifobr, int seqNum, int versionNum,
                                   java.time.LocalDateTime sentAt) {
         if (sentAt == null) {

@@ -621,6 +621,46 @@ public class MimvFormService {
         return identificator;
     }
 
+    // -------------------------------------------------------------------------
+    // Form unsend — POST /mimv/form/unsend
+    // -------------------------------------------------------------------------
+
+    /**
+     * Puts a sent form back in work by clearing DATUM_SLANJA ("Vrati u izradu"). Action and version are not
+     * changed, so the form is NOVI (action N) or ISPRAVAK (action A) again and can be changed, saved, sent and
+     * deleted. Meant for a form whose XML was e-mailed but not submitted to customs.
+     *
+     * @return the identifier
+     * @throws ResourceNotFoundException when no form has this identifier
+     * @throws IllegalArgumentException  when the identifier is empty or the form was not sent
+     */
+    public String unsendForm(String mandatorId, String companyId, FormDeleteRequest request)
+    {
+        String identificator = request != null && request.getIdentificator() != null ? request.getIdentificator().trim() : ""; //$NON-NLS-1$
+        log.info("unsendForm: mandatorId={}, companyId={}, identificator={}", mandatorId, companyId, identificator); //$NON-NLS-1$
+        if (identificator.isEmpty())
+        {
+            throw new IllegalArgumentException("Identifikator obrasca nije poslan."); //$NON-NLS-1$
+        }
+
+        List<As400Repository.SavedFormKey> forms = as400Repository.findMimvZaglavljeByIdentifier(identificator);
+        if (forms.isEmpty())
+        {
+            throw new ResourceNotFoundException("Obrazac " + identificator + " ne postoji. Osvježite popis obrazaca."); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        if (forms.stream().allMatch(f -> f.sentAt() == null))
+        {
+            throw new IllegalArgumentException("Obrazac " + identificator + " nije poslan, pa ga ne treba vraćati u izradu."); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+
+        for (As400Repository.SavedFormKey f : forms)
+        {
+            as400Repository.clearMimvSentAt(f.oib(), f.formDate(), f.sifobr(), f.seqNum(), f.versionNum());
+        }
+        log.info("unsendForm: {} is back in work", identificator); //$NON-NLS-1$
+        return identificator;
+    }
+
     private List<String> collectZaglavljeErrors(ZaglavljeUpdateData z, FormUpdateData data)
     {
         List<String> errors = new ArrayList<>();
